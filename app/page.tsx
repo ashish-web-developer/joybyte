@@ -29,6 +29,9 @@ export default function Home() {
               <span>Play Snack Attack</span>
               <span aria-hidden="true">→</span>
             </Link>
+            <a className="home-how-link" href="#how-to-play">
+              How to play <span aria-hidden="true">↓</span>
+            </a>
             <p className="home-controls">
               Free to play · Mouse, touch, or arrow keys · No downloads
             </p>
@@ -41,7 +44,11 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="home-rules" aria-labelledby="home-rules-title">
+        <section
+          id="how-to-play"
+          className="home-rules"
+          aria-labelledby="home-rules-title"
+        >
           <div className="home-rules-heading">
             <span className="how-spark" aria-hidden="true">✳</span>
             <div>
@@ -60,7 +67,7 @@ export default function Home() {
             </article>
             <article className="home-rule">
               <span className="rule-icon power-icon" aria-hidden="true">🛡️</span>
-              <span><strong>Build a tasty streak</strong><small>Quick catches build combos and bonus points.</small></span>
+              <span><strong>Build a tasty streak</strong><small>Quick catches build combos. Shields block one bad bite; clocks slow snacks for 5 seconds.</small></span>
             </article>
           </div>
         </section>

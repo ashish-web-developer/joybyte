@@ -6,6 +6,27 @@ import type { PointerEvent } from "react";
 
 type GamePhase = "ready" | "playing" | "paused" | "over";
 type SnackKind = "food" | "bomb" | "rotten" | "shield" | "slow";
+type GameMode = "classic" | "zen" | "rush";
+
+interface BasketSkin {
+  id: string;
+  name: string;
+  description: string;
+  requirement: string;
+  unlockScore?: number;
+  unlockDaily?: boolean;
+  top: string;
+  bottom: string;
+  rim: string;
+  face: string;
+}
+
+interface DailyChallenge {
+  date: string;
+  id: string;
+  progress: number;
+  completed: boolean;
+}
 
 interface FallingItem {
   x: number;
@@ -52,10 +73,124 @@ interface GameEngine {
   snacksCaught: number;
   bestCombo: number;
   feedbackUntil: number;
+  mode: GameMode;
+  skinId: string;
 }
 
 const SNACKS = ["🍔", "🍕", "🍩", "🍟", "🍪", "🌮", "🧁"];
 const BEST_SCORE_KEY = "snack-swipe-best";
+const DAILY_CHALLENGE_KEY = "snack-swipe-daily";
+const SELECTED_MODE_KEY = "snack-swipe-mode";
+const SELECTED_SKIN_KEY = "snack-swipe-skin";
+const UNLOCKED_SKINS_KEY = "snack-swipe-unlocked-skins";
+const DAILY_REWARD_SKIN_ID = "gold";
+const GAME_MODES: {
+  id: GameMode;
+  name: string;
+  description: string;
+  icon: string;
+}[] = [
+  {
+    id: "classic",
+    name: "Classic",
+    description: "3 lives · go for your high score",
+    icon: "❤️",
+  },
+  {
+    id: "zen",
+    name: "Zen",
+    description: "No lives · practice at your pace",
+    icon: "🌿",
+  },
+  {
+    id: "rush",
+    name: "60-second rush",
+    description: "Beat the clock · 3 lives",
+    icon: "⏱️",
+  },
+];
+const BASKET_SKINS: BasketSkin[] = [
+  {
+    id: "classic",
+    name: "Classic",
+    description: "The original snack catcher",
+    requirement: "Always unlocked",
+    top: "#fb895c",
+    bottom: "#e65b47",
+    rim: "#ffb27b",
+    face: "#7a3d3c",
+  },
+  {
+    id: "mint",
+    name: "Mint chip",
+    description: "A cool new look",
+    requirement: "Reach 100 points",
+    unlockScore: 100,
+    top: "#65c7ad",
+    bottom: "#31977f",
+    rim: "#9ce5c8",
+    face: "#245e52",
+  },
+  {
+    id: "berry",
+    name: "Berry swirl",
+    description: "A sweet score reward",
+    requirement: "Reach 400 points",
+    unlockScore: 400,
+    top: "#bd83dc",
+    bottom: "#8052b6",
+    rim: "#ddb4f2",
+    face: "#54396e",
+  },
+  {
+    id: DAILY_REWARD_SKIN_ID,
+    name: "Golden bite",
+    description: "A shiny daily challenge reward",
+    requirement: "Complete a daily challenge",
+    unlockDaily: true,
+    top: "#f6c552",
+    bottom: "#d48b28",
+    rim: "#ffe59a",
+    face: "#795124",
+  },
+];
+const DAILY_CHALLENGES = [
+  { id: "snacks", title: "Snack stacker", detail: "Catch 20 tasty snacks", target: 20, unit: "snacks" },
+  { id: "score", title: "Point collector", detail: "Earn 250 points in a round", target: 250, unit: "points" },
+  { id: "combo", title: "Combo chef", detail: "Build a 6× snack combo", target: 6, unit: "combo" },
+] as const;
+function getTodayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getDailyChallenge(date: string): DailyChallenge {
+  const dayNumber = Math.floor(Date.parse(`${date}T00:00:00Z`) / 86_400_000);
+  const definition =
+    DAILY_CHALLENGES[((dayNumber % DAILY_CHALLENGES.length) + DAILY_CHALLENGES.length) % DAILY_CHALLENGES.length];
+  return { date, id: definition.id, progress: 0, completed: false };
+}
+
+function getDailyDefinition(id: string) {
+  return DAILY_CHALLENGES.find((challenge) => challenge.id === id) ?? DAILY_CHALLENGES[0];
+}
+
+function isGameMode(value: string | null): value is GameMode {
+  return GAME_MODES.some((mode) => mode.id === value);
+}
+
+function isDailyChallenge(value: unknown, date: string): value is DailyChallenge {
+  if (typeof value !== "object" || value === null) return false;
+  const challenge = value as Partial<DailyChallenge>;
+  return (
+    challenge.date === date &&
+    typeof challenge.id === "string" &&
+    DAILY_CHALLENGES.some((definition) => definition.id === challenge.id) &&
+    typeof challenge.progress === "number" &&
+    Number.isFinite(challenge.progress) &&
+    challenge.progress >= 0 &&
+    typeof challenge.completed === "boolean"
+  );
+}
 const TUTORIAL_STEPS = [
   {
     icon: "🧺",
@@ -75,8 +210,8 @@ const TUTORIAL_STEPS = [
     icon: "💣",
     label: "03 · DODGE",
     title: "Let the yucky stuff fall",
-    text: "Avoid catching bombs 💣 and rotten snacks 🤢. Catching one costs a life unless a shield blocks it; let it pass safely.",
-    tip: "You start with 3 lives. Lose them all and the round ends.",
+    text: "Avoid catching bombs 💣 and rotten snacks 🤢. In Classic and Rush, catching one costs a life unless a shield blocks it; Zen is a no-lives practice mode.",
+    tip: "Classic and Rush start with 3 lives. Let hazards pass safely.",
   },
   {
     icon: "🛡️",
@@ -94,7 +229,7 @@ const TUTORIAL_STEPS = [
   },
 ];
 
-function createGame(): GameEngine {
+function createGame(mode: GameMode = "classic", skinId = "classic"): GameEngine {
   return {
     width: 0,
     height: 0,
@@ -113,6 +248,8 @@ function createGame(): GameEngine {
     snacksCaught: 0,
     bestCombo: 0,
     feedbackUntil: 0,
+    mode,
+    skinId,
   };
 }
 
@@ -225,6 +362,8 @@ function drawGame(context: CanvasRenderingContext2D, game: GameEngine, time: num
   }
 
   const catcherY = height - 48;
+  const basketSkin =
+    BASKET_SKINS.find((skin) => skin.id === game.skinId) ?? BASKET_SKINS[0];
   context.save();
   context.translate(game.playerX, catcherY);
   if (game.shieldCharges > 0) {
@@ -243,8 +382,8 @@ function drawGame(context: CanvasRenderingContext2D, game: GameEngine, time: num
   context.fill();
 
   const bowl = context.createLinearGradient(0, -13, 0, 29);
-  bowl.addColorStop(0, "#fb895c");
-  bowl.addColorStop(1, "#e65b47");
+  bowl.addColorStop(0, basketSkin.top);
+  bowl.addColorStop(1, basketSkin.bottom);
   context.beginPath();
   context.moveTo(-57, -5);
   context.lineTo(-45, 18);
@@ -252,25 +391,25 @@ function drawGame(context: CanvasRenderingContext2D, game: GameEngine, time: num
   context.lineTo(57, -5);
   context.closePath();
   context.fillStyle = bowl;
-  context.strokeStyle = "#bf493e";
+  context.strokeStyle = basketSkin.bottom;
   context.lineWidth = 3;
   context.fill();
   context.stroke();
   context.beginPath();
   context.ellipse(0, -5, 57, 12, 0, Math.PI, Math.PI * 2);
-  context.fillStyle = "#ffb27b";
+  context.fillStyle = basketSkin.rim;
   context.fill();
-  context.strokeStyle = "#bf493e";
+  context.strokeStyle = basketSkin.bottom;
   context.lineWidth = 3;
   context.stroke();
-  context.fillStyle = "#7a3d3c";
+  context.fillStyle = basketSkin.face;
   context.beginPath();
   context.arc(-11, 12, 2.5, 0, Math.PI * 2);
   context.arc(11, 12, 2.5, 0, Math.PI * 2);
   context.fill();
   context.beginPath();
   context.arc(0, 14, 7, 0.15, Math.PI - 0.15);
-  context.strokeStyle = "#7a3d3c";
+  context.strokeStyle = basketSkin.face;
   context.lineWidth = 2;
   context.stroke();
   context.restore();
@@ -282,6 +421,8 @@ export default function SnackSwipe() {
   const phaseRef = useRef<GamePhase>("ready");
   const pauseStartedRef = useRef<number | null>(null);
   const bestRef = useRef(0);
+  const dailyRef = useRef<DailyChallenge | null>(null);
+  const unlockedSkinsRef = useRef<string[]>(["classic"]);
   const feedbackIdRef = useRef(0);
   const feedbackRef = useRef<Feedback | null>(null);
   const keysRef = useRef({ left: false, right: false });
@@ -289,6 +430,11 @@ export default function SnackSwipe() {
   const soundEnabledRef = useRef(true);
 
   const [phase, setPhase] = useState<GamePhase>("ready");
+  const [selectedMode, setSelectedMode] = useState<GameMode>("classic");
+  const [roundMode, setRoundMode] = useState<GameMode>("classic");
+  const [selectedSkin, setSelectedSkin] = useState("classic");
+  const [unlockedSkins, setUnlockedSkins] = useState<string[]>(["classic"]);
+  const [dailyChallenge, setDailyChallenge] = useState<DailyChallenge | null>(null);
   const [score, setScore] = useState(0);
   const [roundStats, setRoundStats] = useState({ snacksCaught: 0, bestCombo: 0 });
   const [best, setBest] = useState(0);
@@ -320,6 +466,69 @@ export default function SnackSwipe() {
     },
     [],
   );
+
+  const unlockSkin = useCallback((skinId: string) => {
+    if (unlockedSkinsRef.current.includes(skinId)) return;
+    const nextUnlocked = [...unlockedSkinsRef.current, skinId];
+    unlockedSkinsRef.current = nextUnlocked;
+    setUnlockedSkins(nextUnlocked);
+    const skin = BASKET_SKINS.find((candidate) => candidate.id === skinId);
+    showFeedback(
+      "BASKET UNLOCKED!",
+      `${skin?.name ?? "A new basket"} is ready to use after this round.`,
+      "power",
+    );
+    try {
+      window.localStorage.setItem(UNLOCKED_SKINS_KEY, JSON.stringify(nextUnlocked));
+    } catch (error) {
+      console.error("Could not save unlocked Snack Swipe baskets.", error);
+      setStorageWarning(true);
+    }
+  }, [showFeedback]);
+
+  const refreshDailyChallenge = useCallback(() => {
+    const today = getTodayKey();
+    if (dailyRef.current?.date === today) return;
+    const nextDaily = getDailyChallenge(today);
+    dailyRef.current = nextDaily;
+    setDailyChallenge(nextDaily);
+    try {
+      window.localStorage.setItem(DAILY_CHALLENGE_KEY, JSON.stringify(nextDaily));
+    } catch (error) {
+      console.error("Could not refresh today's challenge.", error);
+      setStorageWarning(true);
+    }
+  }, []);
+
+  const updateDailyProgress = useCallback((game: GameEngine) => {
+    const today = getTodayKey();
+    const current =
+      dailyRef.current?.date === today ? dailyRef.current : getDailyChallenge(today);
+    const challenge = getDailyDefinition(current.id);
+    const observed =
+      current.id === "snacks"
+        ? game.snacksCaught
+        : current.id === "score"
+          ? game.score
+          : game.bestCombo;
+    const progress = Math.max(current.progress, observed);
+    if (progress === current.progress && dailyRef.current?.date === today) return;
+
+    const next: DailyChallenge = {
+      ...current,
+      progress: Math.min(progress, challenge.target),
+      completed: current.completed || progress >= challenge.target,
+    };
+    dailyRef.current = next;
+    setDailyChallenge(next);
+    try {
+      window.localStorage.setItem(DAILY_CHALLENGE_KEY, JSON.stringify(next));
+    } catch (error) {
+      console.error("Could not save daily challenge progress.", error);
+      setStorageWarning(true);
+    }
+    if (next.completed && !current.completed) unlockSkin(DAILY_REWARD_SKIN_ID);
+  }, [unlockSkin]);
 
   const pauseGame = useCallback(() => {
     if (phaseRef.current !== "playing") return;
@@ -406,6 +615,106 @@ export default function SnackSwipe() {
   }, []);
 
   useEffect(() => {
+    const today = getTodayKey();
+    let restoredDaily: DailyChallenge | null = null;
+    let restoredUnlocked: string[] = ["classic"];
+    let restoredMode: GameMode | null = null;
+    let restoredSkin: string | null = null;
+    let storageFailed = false;
+
+    try {
+      const savedDaily = window.localStorage.getItem(DAILY_CHALLENGE_KEY);
+      if (savedDaily) {
+        const parsed: unknown = JSON.parse(savedDaily);
+        if (isDailyChallenge(parsed, today)) {
+          const definition = getDailyDefinition(parsed.id);
+          restoredDaily = {
+            ...parsed,
+            progress: Math.min(parsed.progress, definition.target),
+            completed: parsed.completed || parsed.progress >= definition.target,
+          };
+        }
+      }
+
+      const savedUnlocked = window.localStorage.getItem(UNLOCKED_SKINS_KEY);
+      if (savedUnlocked) {
+        const parsed: unknown = JSON.parse(savedUnlocked);
+        if (Array.isArray(parsed)) {
+          restoredUnlocked = [
+            "classic",
+            ...parsed.filter(
+              (skinId): skinId is string =>
+                typeof skinId === "string" &&
+                BASKET_SKINS.some((skin) => skin.id === skinId),
+            ),
+          ];
+        }
+      }
+
+      const savedBest = Number(window.localStorage.getItem(BEST_SCORE_KEY) ?? 0);
+      if (Number.isFinite(savedBest)) {
+        for (const skin of BASKET_SKINS) {
+          if (skin.unlockScore !== undefined && savedBest >= skin.unlockScore) {
+            restoredUnlocked.push(skin.id);
+          }
+        }
+      }
+
+      const storedMode = window.localStorage.getItem(SELECTED_MODE_KEY);
+      if (isGameMode(storedMode)) restoredMode = storedMode;
+
+      const savedSkin = window.localStorage.getItem(SELECTED_SKIN_KEY);
+      if (savedSkin && restoredUnlocked.includes(savedSkin)) {
+        restoredSkin = savedSkin;
+      }
+    } catch (error) {
+      console.error("Could not restore Snack Swipe preferences.", error);
+      storageFailed = true;
+    }
+
+    const nextDaily = restoredDaily ?? getDailyChallenge(today);
+    if (!restoredDaily) {
+      try {
+        window.localStorage.setItem(DAILY_CHALLENGE_KEY, JSON.stringify(nextDaily));
+      } catch (error) {
+        console.error("Could not initialize today's challenge.", error);
+        storageFailed = true;
+      }
+    }
+    if (nextDaily.completed && !restoredUnlocked.includes(DAILY_REWARD_SKIN_ID)) {
+      restoredUnlocked.push(DAILY_REWARD_SKIN_ID);
+      try {
+        window.localStorage.setItem(UNLOCKED_SKINS_KEY, JSON.stringify(restoredUnlocked));
+      } catch (error) {
+        console.error("Could not restore the daily reward basket.", error);
+        storageFailed = true;
+      }
+    }
+    if (restoredUnlocked.length > 1) {
+      try {
+        window.localStorage.setItem(
+          UNLOCKED_SKINS_KEY,
+          JSON.stringify([...new Set(restoredUnlocked)]),
+        );
+      } catch (error) {
+        console.error("Could not save score-unlocked baskets.", error);
+        storageFailed = true;
+      }
+    }
+
+    dailyRef.current = nextDaily;
+    unlockedSkinsRef.current = [...new Set(restoredUnlocked)];
+    const frame = window.requestAnimationFrame(() => {
+      if (restoredMode) setSelectedMode(restoredMode);
+      if (restoredSkin) setSelectedSkin(restoredSkin);
+      setDailyChallenge(nextDaily);
+      setUnlockedSkins(unlockedSkinsRef.current);
+      if (storageFailed) setStorageWarning(true);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
     if (!tutorialOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setTutorialOpen(false);
@@ -416,14 +725,17 @@ export default function SnackSwipe() {
 
   useEffect(() => {
     const handleVisibilityChange = () => {
+      refreshDailyChallenge();
       if (document.visibilityState === "hidden") pauseGame();
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    const dailyRefresh = window.setInterval(refreshDailyChallenge, 60_000);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.clearInterval(dailyRefresh);
     };
-  }, [pauseGame]);
+  }, [pauseGame, refreshDailyChallenge]);
 
   useEffect(() => {
     return () => {
@@ -445,8 +757,8 @@ export default function SnackSwipe() {
       return;
     }
 
-    const game = gameRef.current;
     const resize = () => {
+      const game = gameRef.current;
       const bounds = canvas.getBoundingClientRect();
       const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
       game.width = bounds.width;
@@ -468,11 +780,13 @@ export default function SnackSwipe() {
     let lastFrame = 0;
     let displayedSeconds = -1;
     const animate = (time: number) => {
+      const game = gameRef.current;
       const delta = Math.min((time - (lastFrame || time)) / 1000, 0.04);
       lastFrame = time;
 
       if (phaseRef.current === "playing") {
         game.elapsed += delta;
+        if (game.mode === "rush") game.elapsed = Math.min(game.elapsed, 60);
         const nextSeconds = Math.floor(game.elapsed);
         if (nextSeconds !== displayedSeconds) {
           displayedSeconds = nextSeconds;
@@ -535,6 +849,7 @@ export default function SnackSwipe() {
                 game.score += points;
                 setScore(game.score);
                 setCombo(game.combo);
+                updateDailyProgress(game);
                 showFeedback(
                   `+${points} POINTS`,
                   game.combo > 1
@@ -549,6 +864,14 @@ export default function SnackSwipe() {
                   setNewRecord(true);
                   bestRef.current = game.score;
                   setBest(game.score);
+                  for (const skin of BASKET_SKINS) {
+                    if (
+                      skin.unlockScore !== undefined &&
+                      game.score >= skin.unlockScore
+                    ) {
+                      unlockSkin(skin.id);
+                    }
+                  }
                   try {
                     window.localStorage.setItem(
                       BEST_SCORE_KEY,
@@ -598,6 +921,13 @@ export default function SnackSwipe() {
                     "power",
                   );
                   playTone(390, 0.18);
+                } else if (game.mode === "zen") {
+                  showFeedback(
+                    "ZEN MODE",
+                    "No lives to lose · keep catching snacks!",
+                    "power",
+                  );
+                  playTone(280, 0.16);
                 } else {
                   game.lives -= 1;
                   setLives(game.lives);
@@ -615,7 +945,7 @@ export default function SnackSwipe() {
               setCombo(0);
             }
 
-            if (game.lives <= 0) {
+            if (game.mode !== "zen" && game.lives <= 0) {
               setRoundStats({
                 snacksCaught: game.snacksCaught,
                 bestCombo: game.bestCombo,
@@ -642,6 +972,13 @@ export default function SnackSwipe() {
           setCombo(0);
         }
 
+        if (game.mode === "rush" && game.elapsed >= 60) {
+          setRoundStats({
+            snacksCaught: game.snacksCaught,
+            bestCombo: game.bestCombo,
+          });
+          changePhase("over");
+        }
       }
 
       if (phaseRef.current !== "paused") drawGame(context, game, time);
@@ -653,7 +990,7 @@ export default function SnackSwipe() {
       window.cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, [changePhase, playTone, showFeedback]);
+  }, [changePhase, playTone, showFeedback, unlockSkin, updateDailyProgress]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -697,15 +1034,19 @@ export default function SnackSwipe() {
     };
   }, [pauseGame, resumeGame]);
 
-  const startGame = () => {
+  const startGame = (
+    mode: GameMode = selectedMode,
+    skinId: string = selectedSkin,
+  ) => {
     if (phaseRef.current === "playing") return;
     const previous = gameRef.current;
     gameRef.current = {
-      ...createGame(),
+      ...createGame(mode, skinId),
       width: previous.width,
       height: previous.height,
       playerX: previous.width / 2,
     };
+    setRoundMode(mode);
     setScore(0);
     setRoundStats({ snacksCaught: 0, bestCombo: 0 });
     setLives(3);
@@ -724,6 +1065,33 @@ export default function SnackSwipe() {
     pauseStartedRef.current = null;
     changePhase("playing");
     playTone(520, 0.13);
+  };
+
+  const restartGame = () => {
+    if (phaseRef.current !== "paused") return;
+    startGame(gameRef.current.mode, gameRef.current.skinId);
+  };
+
+  const selectMode = (mode: GameMode) => {
+    setSelectedMode(mode);
+    try {
+      window.localStorage.setItem(SELECTED_MODE_KEY, mode);
+    } catch (error) {
+      console.error("Could not save the selected game mode.", error);
+      setStorageWarning(true);
+    }
+  };
+
+  const selectSkin = (skinId: string) => {
+    if (!unlockedSkinsRef.current.includes(skinId)) return;
+    setSelectedSkin(skinId);
+    gameRef.current.skinId = skinId;
+    try {
+      window.localStorage.setItem(SELECTED_SKIN_KEY, skinId);
+    } catch (error) {
+      console.error("Could not save the selected basket.", error);
+      setStorageWarning(true);
+    }
   };
 
   const openTutorial = () => {
@@ -756,6 +1124,16 @@ export default function SnackSwipe() {
     if (next) playTone(540, 0.1);
   };
 
+  const modeForDisplay = phase === "ready" ? selectedMode : roundMode;
+  const displayedSeconds =
+    modeForDisplay === "rush" ? Math.max(0, 60 - seconds) : seconds;
+  const activeDaily = dailyChallenge
+    ? getDailyDefinition(dailyChallenge.id)
+    : null;
+  const dailyProgress = activeDaily
+    ? Math.min(dailyChallenge?.progress ?? 0, activeDaily.target)
+    : 0;
+
   return (
     <main className="game-shell">
       <div className="game-wrap">
@@ -786,34 +1164,188 @@ export default function SnackSwipe() {
           <div className="doodle-burger" aria-hidden="true">🍔</div>
         </section>
 
-        <section className="game-card" aria-label="Snack Swipe game">
+        {(phase === "ready" || phase === "over") && (
+          <section className="game-lobby" aria-label="Choose your game">
+            <div className="lobby-heading">
+              <span className="lobby-heading-icon" aria-hidden="true">🎮</span>
+              <div>
+                <h2>Make it your game</h2>
+                <p>Pick a mode and basket before you play.</p>
+              </div>
+            </div>
+
+            <div className="daily-challenge-card" aria-live="polite">
+              <div className="daily-challenge-icon" aria-hidden="true">🌟</div>
+              <div className="daily-challenge-copy">
+                <span className="lobby-kicker">TODAY&apos;S DAILY CHALLENGE</span>
+                <strong>{activeDaily?.title ?? "Loading today’s challenge…"}</strong>
+                <span>{activeDaily?.detail ?? "Your challenge is on its way."}</span>
+                {activeDaily && (
+                  <span className="daily-progress-text">
+                    {dailyChallenge?.completed
+                      ? "Challenge complete!"
+                      : `${dailyProgress} / ${activeDaily.target} ${activeDaily.unit}`}
+                  </span>
+                )}
+              </div>
+              {dailyChallenge?.completed ? (
+                <span className="daily-reward-pill">🏆 GOLDEN BITE UNLOCKED</span>
+              ) : (
+                <span className="daily-reward-pill">🔒 Golden Bite basket</span>
+              )}
+              {activeDaily && (
+                <div
+                  className="daily-progress-track"
+                  role="progressbar"
+                  aria-label="Daily challenge progress"
+                  aria-valuemin={0}
+                  aria-valuemax={activeDaily.target}
+                  aria-valuenow={dailyProgress}
+                >
+                  <span
+                    style={{
+                      width: `${(dailyProgress / activeDaily.target) * 100}%`,
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="lobby-section">
+              <div className="lobby-section-title">
+                <span>Choose your mode</span>
+                <span>Switch it up anytime</span>
+              </div>
+              <div className="mode-picker">
+                {GAME_MODES.map((mode) => (
+                  <button
+                    key={mode.id}
+                    className={`mode-option ${selectedMode === mode.id ? "is-selected" : ""}`}
+                    type="button"
+                    onClick={() => selectMode(mode.id)}
+                    aria-pressed={selectedMode === mode.id}
+                  >
+                    <span className="mode-option-icon" aria-hidden="true">
+                      {mode.icon}
+                    </span>
+                    <span className="mode-option-copy">
+                      <strong>{mode.name}</strong>
+                      <small>{mode.description}</small>
+                    </span>
+                    <span className="mode-check" aria-hidden="true">
+                      {selectedMode === mode.id ? "✓" : ""}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="lobby-section basket-section">
+              <div className="lobby-section-title">
+                <span>Choose your basket</span>
+                <span>{unlockedSkins.length} / {BASKET_SKINS.length} unlocked</span>
+              </div>
+              <div className="basket-picker">
+                {BASKET_SKINS.map((skin) => {
+                  const isUnlocked = unlockedSkins.includes(skin.id);
+                  return (
+                    <button
+                      key={skin.id}
+                      className={`basket-option ${selectedSkin === skin.id ? "is-selected" : ""} ${!isUnlocked ? "is-locked" : ""}`}
+                      type="button"
+                      onClick={() => selectSkin(skin.id)}
+                      disabled={!isUnlocked}
+                      aria-pressed={selectedSkin === skin.id}
+                      title={isUnlocked ? skin.description : skin.requirement}
+                    >
+                      <span
+                        className="basket-swatch"
+                        aria-hidden="true"
+                        style={{
+                          background: `linear-gradient(160deg, ${skin.rim} 0 25%, ${skin.top} 26%, ${skin.bottom} 100%)`,
+                        }}
+                      >
+                        {isUnlocked ? "☺" : "🔒"}
+                      </span>
+                      <strong>{skin.name}</strong>
+                      <small>{isUnlocked ? skin.description : skin.requirement}</small>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        )}
+
+        <section
+          className={`game-card ${phase === "paused" ? "is-paused" : ""}`}
+          aria-label="Snack Swipe game"
+        >
           <div className="scoreboard">
             <div className="score-tile score-main">
               <span className="tile-label">YOUR SCORE</span>
-              <strong className="score-number">{score.toString().padStart(3, "0")}</strong>
+              <strong
+                key={score}
+                className="score-number"
+                aria-live="polite"
+                aria-label={`Score ${score}`}
+              >
+                {score.toString().padStart(3, "0")}
+              </strong>
               {combo > 1 && phase === "playing" ? (
-                <span
-                  className="combo-badge"
-                  title="Catch another snack within 1.45 seconds to keep your combo going."
-                >
-                  🔥 Combo ×{combo}
+                <span className="combo-status">
+                  <span
+                    className="combo-badge"
+                    title="Catch another snack within 1.45 seconds to keep your combo going."
+                  >
+                    🔥 Combo ×{combo}
+                  </span>
+                  <span
+                    key={combo}
+                    className="combo-timer"
+                    role="progressbar"
+                    aria-label="Time remaining to continue combo"
+                    aria-valuemin={0}
+                    aria-valuemax={1450}
+                    aria-valuenow={1450}
+                  >
+                    <span />
+                  </span>
                 </span>
               ) : (
                 <span className="tile-caption">Snacks are +10 each</span>
               )}
             </div>
             <div className="score-tile">
-              <span className="tile-label">TIME</span>
-              <strong className="mini-score timer-score">{formatTime(seconds)}</strong>
-              <span className="tile-caption">Time in this round</span>
+              <span className="tile-label">
+                {modeForDisplay === "rush" ? "TIME LEFT" : "TIME"}
+              </span>
+              <strong className="mini-score timer-score">
+                {formatTime(displayedSeconds)}
+              </strong>
+              <span className="tile-caption">
+                {modeForDisplay === "rush" ? "60-second rush" : "Time in this round"}
+              </span>
             </div>
             <div className="score-tile lives-tile">
-              <span className="tile-label">LIVES LEFT</span>
-              <strong className="life-icons" aria-label={`${lives} lives left`}>
-                {"❤️".repeat(Math.max(0, lives))}
-                {"🤍".repeat(Math.max(0, 3 - lives))}
+              <span className="tile-label">
+                {modeForDisplay === "zen" ? "PRACTICE MODE" : "LIVES LEFT"}
+              </span>
+              <strong
+                key={`${modeForDisplay}-${lives}`}
+                className={`life-icons ${modeForDisplay === "zen" ? "zen-lives" : ""}`}
+                aria-label={modeForDisplay === "zen" ? "Unlimited lives" : `${lives} lives left`}
+              >
+                {modeForDisplay === "zen"
+                  ? "∞"
+                  : "❤️".repeat(Math.max(0, lives)) +
+                    "🤍".repeat(Math.max(0, 3 - lives))}
               </strong>
-              <span className="tile-caption">Avoid 💣 &amp; 🤢</span>
+              <span className="tile-caption">
+                {modeForDisplay === "zen"
+                  ? "No lives · no game over"
+                  : "Avoid 💣 & 🤢"}
+              </span>
             </div>
             <div className="score-tile">
               <span className="tile-label">PERSONAL BEST</span>
@@ -821,6 +1353,49 @@ export default function SnackSwipe() {
               <span className="tile-caption">Saved on this device</span>
             </div>
           </div>
+
+          {phase === "playing" && activeDaily && dailyChallenge && (
+            <div
+              className={`live-challenge ${dailyChallenge.completed ? "is-complete" : ""}`}
+              aria-live="polite"
+            >
+              <span className="live-challenge-icon" aria-hidden="true">
+                {dailyChallenge.completed ? "🏆" : "✨"}
+              </span>
+              <span className="live-challenge-copy">
+                <strong>
+                  {dailyChallenge.completed
+                    ? "Daily challenge complete!"
+                    : `Daily: ${activeDaily.title}`}
+                </strong>
+                <small>
+                  {dailyChallenge.completed
+                    ? "Golden Bite basket unlocked"
+                    : `${dailyProgress} / ${activeDaily.target} ${activeDaily.unit} · Golden Bite reward`}
+                </small>
+              </span>
+              <span
+                className="live-challenge-value"
+                aria-label={`${dailyProgress} of ${activeDaily.target}`}
+              >
+                {dailyProgress}/{activeDaily.target}
+              </span>
+              <span
+                className="live-challenge-track"
+                role="progressbar"
+                aria-label="Daily challenge progress"
+                aria-valuemin={0}
+                aria-valuemax={activeDaily.target}
+                aria-valuenow={dailyProgress}
+              >
+                <span
+                  style={{
+                    width: `${(dailyProgress / activeDaily.target) * 100}%`,
+                  }}
+                />
+              </span>
+            </div>
+          )}
 
           <div className={`playfield-wrap ${phase === "playing" ? "is-playing" : ""}`}>
             <canvas
@@ -856,7 +1431,20 @@ export default function SnackSwipe() {
                 </button>
                 <div className="level-pill" title="Heat rises every 14 seconds; snacks fall faster at each level.">
                   <span className="level-dot" /> HEAT {heat}
-                  <span className="level-caption">· faster every 14s</span>
+                  <span className="level-caption">
+                    · next heat in {14 - (seconds % 14)}s
+                  </span>
+                  <span
+                    className="heat-meter"
+                    role="progressbar"
+                    aria-label="Progress until the next heat level"
+                    aria-valuemin={0}
+                    aria-valuemax={14}
+                    aria-valuenow={seconds % 14}
+                    aria-valuetext={`${14 - (seconds % 14)} seconds until the next heat level`}
+                  >
+                    <span style={{ width: `${((seconds % 14) / 14) * 100}%` }} />
+                  </span>
                 </div>
                 <div className="power-status" aria-live="polite">
                   {shieldCharges > 0 && (
@@ -925,20 +1513,25 @@ export default function SnackSwipe() {
                         </div>
                         <div>
                           <strong>{formatTime(seconds)}</strong>
-                          <span>TIME</span>
+                          <span>TIME PLAYED</span>
                         </div>
                       </div>
                       <div className="achievement-row" aria-label="Round achievements">
+                        <span>
+                          {GAME_MODES.find((mode) => mode.id === roundMode)?.icon}{" "}
+                          {GAME_MODES.find((mode) => mode.id === roundMode)?.name} mode
+                        </span>
                         {newRecord && <span>🌟 Personal best</span>}
                         {roundStats.bestCombo >= 3 && <span>🔥 Combo chef</span>}
                         {roundStats.snacksCaught >= 10 && <span>🍱 Snack collector</span>}
+                        {dailyChallenge?.completed && <span>🌟 Daily challenge complete</span>}
                         {!newRecord &&
                           roundStats.bestCombo < 3 &&
                           roundStats.snacksCaught < 10 && (
                             <span>🥄 Every snack counts—give it another go!</span>
                           )}
                       </div>
-                      <button className="start-button" type="button" onClick={startGame}>
+                      <button className="start-button" type="button" onClick={() => startGame()}>
                         <span>Retry</span>
                         <span aria-hidden="true">↻</span>
                       </button>
@@ -948,9 +1541,15 @@ export default function SnackSwipe() {
                       <div className="welcome-rules">
                         <span>🍕 <b>Catch</b> for +10</span>
                         <span>💣🤢 <b>Let them pass</b></span>
-                        <span>❤️ <b>3 lives</b></span>
+                        <span>
+                          {selectedMode === "zen"
+                            ? <>🌿 <b>Unlimited practice</b></>
+                            : selectedMode === "rush"
+                              ? <>⏱️ <b>60 seconds · 3 lives</b></>
+                              : <>❤️ <b>3 lives</b></>}
+                        </span>
                       </div>
-                      <button className="start-button" type="button" onClick={startGame}>
+                      <button className="start-button" type="button" onClick={() => startGame()}>
                         <span>Play</span>
                         <span aria-hidden="true">→</span>
                       </button>
@@ -973,7 +1572,11 @@ export default function SnackSwipe() {
                   <span className="overlay-emoji" aria-hidden="true">⏸️</span>
                   <span className="pause-eyebrow">TAKE YOUR TIME</span>
                   <h2>Game paused</h2>
-                  <p>Your snacks are frozen. Pick up right where you left off.</p>
+                  <p>
+                    {roundMode === "rush"
+                      ? `${formatTime(displayedSeconds)} left on the clock · your game is frozen.`
+                      : "Your snacks are frozen. Pick up right where you left off."}
+                  </p>
                   <button
                     className="start-button resume-button"
                     type="button"
@@ -985,7 +1588,7 @@ export default function SnackSwipe() {
                   <button
                     className="pause-secondary-button"
                     type="button"
-                    onClick={startGame}
+                    onClick={restartGame}
                   >
                     ↻ Restart this game
                   </button>
@@ -1000,7 +1603,14 @@ export default function SnackSwipe() {
           <div className="game-footer">
             <div className="controls-hint">
               <span className="control-icon" aria-hidden="true">↔</span>
-              <span><strong>Goal:</strong> score as much as you can before your 3 lives run out.</span>
+              <span>
+                <strong>Goal:</strong>{" "}
+                {modeForDisplay === "zen"
+                  ? "practice freely and build your best combo."
+                  : modeForDisplay === "rush"
+                    ? "score as much as you can in 60 seconds."
+                    : "score as much as you can before your 3 lives run out."}
+              </span>
             </div>
             <span className="keyboard-hint">Personal best: {best}</span>
           </div>
@@ -1117,7 +1727,7 @@ export default function SnackSwipe() {
                 <button
                   className="start-button tutorial-next-button"
                   type="button"
-                  onClick={startGame}
+                  onClick={() => startGame()}
                 >
                   Let&apos;s play <span aria-hidden="true">→</span>
                 </button>
