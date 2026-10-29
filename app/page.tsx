@@ -71,6 +71,27 @@ export default function Home() {
             </article>
           </div>
         </section>
+
+        <section className="mt-8 rounded-2xl border border-slate-800 bg-slate-950 p-6 text-white shadow-xl sm:flex sm:items-center sm:justify-between sm:gap-8 sm:p-8">
+          <div>
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-lime-300">
+              A new game to get lost in
+            </p>
+            <h2 className="text-2xl font-extrabold tracking-tight sm:text-3xl">
+              Light up the grid.
+            </h2>
+            <p className="mt-2 max-w-lg text-sm leading-6 text-slate-300">
+              Rotate the circuit, collect every signal, and find your way out
+              in Loopbreak.
+            </p>
+          </div>
+          <Link
+            className="mt-5 inline-flex shrink-0 items-center gap-3 rounded-xl bg-lime-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:-translate-y-0.5 hover:bg-lime-200 sm:mt-0"
+            href="/games/loopbreak"
+          >
+            Play Loopbreak <span aria-hidden="true">↗</span>
+          </Link>
+        </section>
       </div>
     </main>
   );
