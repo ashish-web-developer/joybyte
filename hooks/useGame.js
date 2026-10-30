@@ -9,6 +9,7 @@ const INITIAL_PLAYERS = {
   [PLAYER_IDS.HUMAN]: { ...PLAYER_DETAILS[PLAYER_IDS.HUMAN], position: 0 },
   [PLAYER_IDS.COMPUTER]: { ...PLAYER_DETAILS[PLAYER_IDS.COMPUTER], position: 0 },
 };
+const COMPUTER_TURN_DELAY = 1500;
 const SOUND_PREFERENCE_EVENT = "snakes-ladders-sound-preference";
 let inMemorySoundPreference = true;
 
@@ -133,7 +134,10 @@ export default function useGame() {
     const playback = audio.play();
     if (playback) {
       playback.catch((error) => {
-        activeSoundsRef.current.delete(kind);
+        if (audio.paused) {
+          activeSoundsRef.current.delete(kind);
+        }
+        if (error?.name === "AbortError") return;
         console.error(`Could not play the "${kind}" game sound.`, error);
       });
     }
@@ -254,7 +258,7 @@ export default function useGame() {
     if (turn !== PLAYER_IDS.COMPUTER || phase !== "ready") return undefined;
     const timeout = window.setTimeout(() => {
       rollDice();
-    }, 850);
+    }, COMPUTER_TURN_DELAY);
     return () => window.clearTimeout(timeout);
   }, [phase, rollDice, turn]);
 
