@@ -223,7 +223,7 @@ Review the manifest name and colors before deploying.
       compressionOptions: { level: 6 },
     });
 
-    return new Response(zipBuffer, {
+    return new Response(new Uint8Array(zipBuffer), {
       status: 200,
       headers: {
         "Content-Type": "application/zip",
