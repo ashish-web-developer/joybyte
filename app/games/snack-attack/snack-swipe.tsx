@@ -268,7 +268,17 @@ function addSparkles(game: GameEngine, x: number, y: number, color: string) {
   }
 }
 
+function getGameScale(width: number) {
+  return Math.min(1, Math.max(0.65, width / 480));
+}
+
+function getBasketHalfWidth(game: GameEngine) {
+  return 57 * getGameScale(game.width);
+}
+
 function spawnItem(game: GameEngine) {
+  const scale = getGameScale(game.width);
+  const radius = 21 * scale;
   const roll = Math.random();
   let kind: SnackKind = "food";
   let emoji = SNACKS[Math.floor(Math.random() * SNACKS.length)];
@@ -288,10 +298,10 @@ function spawnItem(game: GameEngine) {
   }
 
   game.items.push({
-    x: 30 + Math.random() * Math.max(1, game.width - 60),
-    y: -35,
+    x: radius + 5 + Math.random() * Math.max(1, game.width - 2 * (radius + 5)),
+    y: -35 * scale,
     speed: 145 + game.elapsed * 2.2 + Math.random() * 55,
-    radius: 21,
+    radius,
     rotation: (Math.random() - 0.5) * 0.25,
     wobble: Math.random() * Math.PI * 2,
     kind,
@@ -323,16 +333,17 @@ function drawGame(context: CanvasRenderingContext2D, game: GameEngine, time: num
   }
   context.restore();
 
+  const scale = getGameScale(width);
   for (const item of game.items) {
-    const bob = Math.sin(time / 180 + item.wobble) * 3;
+    const bob = Math.sin(time / 180 + item.wobble) * 3 * scale;
     context.save();
     context.translate(item.x, item.y + bob);
     context.rotate(Math.sin(time / 350 + item.wobble) * item.rotation);
     context.shadowColor = "rgba(98, 53, 38, 0.2)";
-    context.shadowBlur = 12;
-    context.shadowOffsetY = 5;
+    context.shadowBlur = 12 * scale;
+    context.shadowOffsetY = 5 * scale;
     context.beginPath();
-    context.arc(0, 0, item.radius + 3, 0, Math.PI * 2);
+    context.arc(0, 0, item.radius + 3 * scale, 0, Math.PI * 2);
     context.fillStyle =
       item.kind === "bomb"
         ? "#57465f"
@@ -361,11 +372,12 @@ function drawGame(context: CanvasRenderingContext2D, game: GameEngine, time: num
     context.restore();
   }
 
-  const catcherY = height - 48;
+  const catcherY = height - 48 * scale;
   const basketSkin =
     BASKET_SKINS.find((skin) => skin.id === game.skinId) ?? BASKET_SKINS[0];
   context.save();
   context.translate(game.playerX, catcherY);
+  context.scale(scale, scale);
   if (game.shieldCharges > 0) {
     context.beginPath();
     context.ellipse(0, 3, 72, 33, 0, 0, Math.PI * 2);
@@ -761,11 +773,27 @@ export default function SnackSwipe() {
       const game = gameRef.current;
       const bounds = canvas.getBoundingClientRect();
       const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+      const previousWidth = game.width;
+      const previousScale = getGameScale(previousWidth);
       game.width = bounds.width;
       game.height = bounds.height;
+      const scale = getGameScale(bounds.width);
+      if (previousWidth > 0 && previousWidth !== bounds.width) {
+        const widthRatio = bounds.width / previousWidth;
+        const objectScaleRatio = scale / previousScale;
+        game.items.forEach((item) => {
+          item.x *= widthRatio;
+          item.radius *= objectScaleRatio;
+        });
+        game.sparkles.forEach((sparkle) => {
+          sparkle.x *= widthRatio;
+        });
+        game.playerX *= widthRatio;
+      }
+      const basketHalfWidth = getBasketHalfWidth(game);
       game.playerX = Math.min(
-        Math.max(game.playerX || bounds.width / 2, 62),
-        bounds.width - 62,
+        Math.max(game.playerX || bounds.width / 2, basketHalfWidth),
+        Math.max(basketHalfWidth, bounds.width - basketHalfWidth),
       );
       canvas.width = Math.round(bounds.width * pixelRatio);
       canvas.height = Math.round(bounds.height * pixelRatio);
@@ -805,12 +833,14 @@ export default function SnackSwipe() {
           setHeat(nextLevel);
         }
 
-        const catcherY = game.height - 48;
-        if (keysRef.current.left) game.playerX -= 370 * delta;
-        if (keysRef.current.right) game.playerX += 370 * delta;
+        const scale = getGameScale(game.width);
+        const basketHalfWidth = getBasketHalfWidth(game);
+        const catcherY = game.height - 48 * scale;
+        if (keysRef.current.left) game.playerX -= 370 * scale * delta;
+        if (keysRef.current.right) game.playerX += 370 * scale * delta;
         game.playerX = Math.min(
-          Math.max(game.playerX, 62),
-          Math.max(62, game.width - 62),
+          Math.max(game.playerX, basketHalfWidth),
+          Math.max(basketHalfWidth, game.width - basketHalfWidth),
         );
 
         game.spawnClock += delta * 1000;
@@ -832,10 +862,11 @@ export default function SnackSwipe() {
           item.y += item.speed * delta * slowFactor;
 
           const reachedCatcher =
-            previousY + item.radius < catcherY - 5 &&
-            item.y + item.radius >= catcherY - 5;
+            previousY + item.radius < catcherY - 5 * scale &&
+            item.y + item.radius >= catcherY - 5 * scale;
           if (reachedCatcher) {
-            const caught = Math.abs(item.x - game.playerX) < 62 + item.radius;
+            const caught =
+              Math.abs(item.x - game.playerX) < basketHalfWidth + item.radius;
             if (caught) {
               game.items.splice(index, 1);
 
@@ -1111,9 +1142,10 @@ export default function SnackSwipe() {
     const canvas = canvasRef.current;
     if (!canvas || phaseRef.current !== "playing") return;
     const bounds = canvas.getBoundingClientRect();
+    const basketHalfWidth = getBasketHalfWidth(gameRef.current);
     gameRef.current.playerX = Math.min(
-      Math.max(event.clientX - bounds.left, 62),
-      Math.max(62, bounds.width - 62),
+      Math.max(event.clientX - bounds.left, basketHalfWidth),
+      Math.max(basketHalfWidth, bounds.width - basketHalfWidth),
     );
   };
 

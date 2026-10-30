@@ -92,6 +92,26 @@ export default function Home() {
             Play Loopbreak <span aria-hidden="true">↗</span>
           </Link>
         </section>
+
+        <section className="mt-4 rounded-2xl border border-[#efdfce] bg-white/80 p-6 shadow-[0_12px_30px_rgba(130,84,55,0.06)] sm:flex sm:items-center sm:justify-between sm:gap-8 sm:p-8">
+          <div>
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-[#c67c50]">
+              A classic, with a little extra charm
+            </p>
+            <h2 className="text-2xl font-extrabold tracking-tight text-[#352a32] sm:text-3xl">
+              Roll your way to 100.
+            </h2>
+            <p className="mt-2 max-w-lg text-sm leading-6 text-[#8d7e7e]">
+              Race Clover, climb a few ladders, and try not to get caught by a snake.
+            </p>
+          </div>
+          <Link
+            className="mt-5 inline-flex shrink-0 items-center gap-3 rounded-xl bg-[#f27648] px-5 py-3 text-sm font-bold text-white transition hover:-translate-y-0.5 hover:bg-[#df6840] sm:mt-0"
+            href="/games/snakes-and-ladders"
+          >
+            Play Snakes &amp; Ladders <span aria-hidden="true">↗</span>
+          </Link>
+        </section>
       </div>
     </main>
   );
