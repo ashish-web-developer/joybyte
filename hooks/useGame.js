@@ -1,13 +1,51 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { PLAYER_DETAILS, PLAYER_IDS } from "../lib/gameConfig";
 import { getMoveResult, rollDie } from "../lib/gameLogic";
+import { SOUND_EFFECTS, SOUND_PREFERENCE_KEY } from "../lib/soundEffects";
 
 const INITIAL_PLAYERS = {
   [PLAYER_IDS.HUMAN]: { ...PLAYER_DETAILS[PLAYER_IDS.HUMAN], position: 0 },
   [PLAYER_IDS.COMPUTER]: { ...PLAYER_DETAILS[PLAYER_IDS.COMPUTER], position: 0 },
 };
+const SOUND_PREFERENCE_EVENT = "snakes-ladders-sound-preference";
+let inMemorySoundPreference = true;
+
+function getSoundPreferenceSnapshot() {
+  try {
+    const savedPreference = window.sessionStorage.getItem(SOUND_PREFERENCE_KEY);
+    if (savedPreference !== null) {
+      inMemorySoundPreference = savedPreference === "true";
+    }
+  } catch (error) {
+    console.error("Could not read the sound preference for this game session.", error);
+  }
+  return inMemorySoundPreference;
+}
+
+function getServerSoundPreferenceSnapshot() {
+  return true;
+}
+
+function subscribeToSoundPreference(callback) {
+  window.addEventListener(SOUND_PREFERENCE_EVENT, callback);
+  window.addEventListener("storage", callback);
+  return () => {
+    window.removeEventListener(SOUND_PREFERENCE_EVENT, callback);
+    window.removeEventListener("storage", callback);
+  };
+}
+
+function saveSoundPreference(enabled) {
+  inMemorySoundPreference = enabled;
+  try {
+    window.sessionStorage.setItem(SOUND_PREFERENCE_KEY, String(enabled));
+  } catch (error) {
+    console.error("Could not save the sound preference for this game session.", error);
+  }
+  window.dispatchEvent(new Event(SOUND_PREFERENCE_EVENT));
+}
 
 const wait = (duration) =>
   new Promise((resolve) => {
@@ -21,66 +59,101 @@ export default function useGame() {
   const [die, setDie] = useState(1);
   const [lastRoll, setLastRoll] = useState(null);
   const [message, setMessage] = useState("Your adventure starts at square 0.");
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const soundEnabled = useSyncExternalStore(
+    subscribeToSoundPreference,
+    getSoundPreferenceSnapshot,
+    getServerSoundPreferenceSnapshot,
+  );
   const busyRef = useRef(false);
   const generationRef = useRef(0);
   const mountedRef = useRef(true);
-  const audioContextRef = useRef(null);
+  const soundEnabledRef = useRef(true);
+  const audioRefs = useRef({});
+  const activeSoundsRef = useRef(new Set());
 
   useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+  }, [soundEnabled]);
+
+  useEffect(() => {
+    const activeSounds = activeSoundsRef.current;
     mountedRef.current = true;
+    for (const [kind, effect] of Object.entries(SOUND_EFFECTS)) {
+      const audio = new Audio(effect.src);
+      audio.preload = "auto";
+      audio.volume = effect.volume;
+      audio.addEventListener("ended", () => {
+        activeSounds.delete(kind);
+      });
+      audioRefs.current[kind] = audio;
+    }
+
     return () => {
       mountedRef.current = false;
       generationRef.current += 1;
-      if (audioContextRef.current) {
-        audioContextRef.current.close().catch((error) => {
-          console.error("Could not close the game audio context.", error);
-        });
+      for (const audio of Object.values(audioRefs.current)) {
+        audio.pause();
       }
+      activeSounds.clear();
+      audioRefs.current = {};
     };
   }, []);
 
-  const playSound = useCallback((kind) => {
-    if (!soundEnabled || typeof window === "undefined") return;
-
-    try {
-      const AudioContextClass = window.AudioContext;
-      if (!AudioContextClass) {
-        throw new Error("Web Audio is not supported by this browser.");
-      }
-      const context =
-        audioContextRef.current || (audioContextRef.current = new AudioContextClass());
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      const tones = {
-        roll: [370, 0.11],
-        ladder: [660, 0.17],
-        snake: [190, 0.22],
-        win: [880, 0.26],
-      };
-      const [frequency, duration] = tones[kind];
-      oscillator.type = "triangle";
-      oscillator.frequency.setValueAtTime(frequency, context.currentTime);
-      gain.gain.setValueAtTime(0.0001, context.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.015);
-      gain.gain.exponentialRampToValueAtTime(
-        0.0001,
-        context.currentTime + duration,
-      );
-      oscillator.connect(gain);
-      gain.connect(context.destination);
-      oscillator.start();
-      oscillator.stop(context.currentTime + duration);
-    } catch (error) {
-      console.error("Could not play a game sound.", error);
+  const stopAllSounds = useCallback(() => {
+    for (const audio of Object.values(audioRefs.current)) {
+      audio.pause();
+      audio.currentTime = 0;
     }
-  }, [soundEnabled]);
-
-  const toggleSound = useCallback(() => {
-    setSoundEnabled((enabled) => !enabled);
+    activeSoundsRef.current.clear();
   }, []);
 
+  const playSound = useCallback((kind, { force = false } = {}) => {
+    if ((!soundEnabledRef.current && !force) || typeof window === "undefined") return;
+
+    const audio = audioRefs.current[kind];
+    if (!audio) {
+      console.error(`The "${kind}" game sound is not available.`);
+      return;
+    }
+
+    if (kind === "step" && activeSoundsRef.current.has("step")) return;
+    if (kind === "step" && (activeSoundsRef.current.has("ladder") || activeSoundsRef.current.has("snake") || activeSoundsRef.current.has("win"))) return;
+
+    if (["ladder", "snake", "win", "turn"].includes(kind)) {
+      stopAllSounds();
+    } else if (kind === "land") {
+      const rolling = audioRefs.current.roll;
+      rolling.pause();
+      rolling.currentTime = 0;
+      activeSoundsRef.current.delete("roll");
+    }
+    audio.volume = SOUND_EFFECTS[kind].volume;
+    audio.currentTime = 0;
+    activeSoundsRef.current.add(kind);
+    const playback = audio.play();
+    if (playback) {
+      playback.catch((error) => {
+        activeSoundsRef.current.delete(kind);
+        console.error(`Could not play the "${kind}" game sound.`, error);
+      });
+    }
+  }, [stopAllSounds]);
+
+  const toggleSound = useCallback(() => {
+    const enabled = !soundEnabledRef.current;
+    soundEnabledRef.current = enabled;
+    saveSoundPreference(enabled);
+
+    if (enabled) {
+      playSound("click", { force: true });
+    } else {
+      stopAllSounds();
+    }
+  }, [playSound, stopAllSounds]);
+
   const newGame = useCallback(() => {
+    stopAllSounds();
+    playSound("click");
     generationRef.current += 1;
     busyRef.current = false;
     setPlayers({
@@ -95,7 +168,7 @@ export default function useGame() {
     setDie(1);
     setLastRoll(null);
     setMessage("Your adventure starts at square 0.");
-  }, []);
+  }, [playSound, stopAllSounds]);
 
   const rollDice = useCallback(async () => {
     if (busyRef.current || phase !== "ready") return;
@@ -122,12 +195,14 @@ export default function useGame() {
       setLastRoll({ playerId, value });
       setPhase("moving");
       setMessage(`${playerName} rolled a ${value}.`);
+      playSound("land");
 
       const result = getMoveResult(start, value);
       if (result.exactFinishRequired) {
         setMessage(`${playerName} needs an exact roll to reach 100. No move this turn.`);
         await wait(650);
         if (!mountedRef.current || generationRef.current !== gameGeneration) return;
+        if (playerId === PLAYER_IDS.HUMAN) playSound("turn");
         setTurn(playerId === PLAYER_IDS.HUMAN ? PLAYER_IDS.COMPUTER : PLAYER_IDS.HUMAN);
         setPhase("ready");
         return;
@@ -140,6 +215,7 @@ export default function useGame() {
           ...current,
           [playerId]: { ...current[playerId], position: square },
         }));
+        playSound("step");
       }
 
       if (result.effect) {
@@ -164,6 +240,7 @@ export default function useGame() {
       if (!result.effect) {
         setMessage(`${playerName} landed on square ${result.position}.`);
       }
+      if (playerId === PLAYER_IDS.HUMAN) playSound("turn");
       setTurn(playerId === PLAYER_IDS.HUMAN ? PLAYER_IDS.COMPUTER : PLAYER_IDS.HUMAN);
       setPhase("ready");
     } finally {
