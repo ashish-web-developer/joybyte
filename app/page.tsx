@@ -72,6 +72,27 @@ export default function Home() {
           </div>
         </section>
 
+        <section className="mt-8 rounded-2xl border border-[#343c36] bg-[#171d1a] p-6 text-[#eee9dc] shadow-xl sm:flex sm:items-center sm:justify-between sm:gap-8 sm:p-8">
+          <div>
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-[#d5ad6e]">
+              A new city. A way out.
+            </p>
+            <h2 className="text-2xl font-extrabold tracking-tight sm:text-3xl">
+              Take the long way home.
+            </h2>
+            <p className="mt-2 max-w-lg text-sm leading-6 text-[#a3aaa0]">
+              Read the streets, keep the car on the road, and find the studio
+              before midnight in ESCAPE ROUTE.
+            </p>
+          </div>
+          <Link
+            className="mt-5 inline-flex shrink-0 items-center gap-3 rounded-xl bg-[#d5ad6e] px-5 py-3 text-sm font-bold text-[#1d211e] transition hover:-translate-y-0.5 hover:bg-[#e2bd82] sm:mt-0"
+            href="/games/escape-route"
+          >
+            Drive Escape Route <span aria-hidden="true">↗</span>
+          </Link>
+        </section>
+
         <section className="mt-8 rounded-2xl border border-slate-800 bg-slate-950 p-6 text-white shadow-xl sm:flex sm:items-center sm:justify-between sm:gap-8 sm:p-8">
           <div>
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-lime-300">
