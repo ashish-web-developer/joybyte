@@ -99,7 +99,7 @@ const GAME_MODES: {
   {
     id: "zen",
     name: "Zen",
-    description: "No lives · practice at your pace",
+    description: "No lives to lose · practice freely",
     icon: "🌿",
   },
   {
@@ -443,6 +443,7 @@ export default function SnackSwipe() {
 
   const [phase, setPhase] = useState<GamePhase>("ready");
   const [selectedMode, setSelectedMode] = useState<GameMode>("classic");
+  const [setupOpen, setSetupOpen] = useState(false);
   const [roundMode, setRoundMode] = useState<GameMode>("classic");
   const [selectedSkin, setSelectedSkin] = useState("classic");
   const [unlockedSkins, setUnlockedSkins] = useState<string[]>(["classic"]);
@@ -1091,6 +1092,7 @@ export default function SnackSwipe() {
     setNewRecord(false);
     setTutorialOpen(false);
     setTutorialStep(0);
+    setSetupOpen(false);
     keysRef.current.left = false;
     keysRef.current.right = false;
     pauseStartedRef.current = null;
@@ -1162,6 +1164,8 @@ export default function SnackSwipe() {
   const activeDaily = dailyChallenge
     ? getDailyDefinition(dailyChallenge.id)
     : null;
+  const activeBasket =
+    BASKET_SKINS.find((skin) => skin.id === selectedSkin) ?? BASKET_SKINS[0];
   const dailyProgress = activeDaily
     ? Math.min(dailyChallenge?.progress ?? 0, activeDaily.target)
     : 0;
@@ -1197,115 +1201,140 @@ export default function SnackSwipe() {
         </section>
 
         {(phase === "ready" || phase === "over") && (
-          <section className="game-lobby" aria-label="Choose your game">
-            <div className="lobby-heading">
-              <span className="lobby-heading-icon" aria-hidden="true">🎮</span>
-              <div>
-                <h2>Make it your game</h2>
-                <p>Pick a mode and basket before you play.</p>
-              </div>
-            </div>
-
-            <div className="daily-challenge-card" aria-live="polite">
-              <div className="daily-challenge-icon" aria-hidden="true">🌟</div>
-              <div className="daily-challenge-copy">
-                <span className="lobby-kicker">TODAY&apos;S DAILY CHALLENGE</span>
-                <strong>{activeDaily?.title ?? "Loading today’s challenge…"}</strong>
-                <span>{activeDaily?.detail ?? "Your challenge is on its way."}</span>
-                {activeDaily && (
-                  <span className="daily-progress-text">
+          <section className="game-lobby" aria-label="Game setup and daily challenge">
+            <div className="lobby-compact-row">
+              <div
+                className={`daily-challenge-card ${dailyChallenge?.completed ? "is-complete" : ""}`}
+                aria-live="polite"
+              >
+                <span className="daily-challenge-icon" aria-hidden="true">
+                  {dailyChallenge?.completed ? "🏆" : "🌟"}
+                </span>
+                <span className="daily-challenge-copy">
+                  <span className="lobby-kicker">TODAY&apos;S CHALLENGE</span>
+                  <strong>{activeDaily?.title ?? "Loading challenge…"}</strong>
+                  <small>
                     {dailyChallenge?.completed
-                      ? "Challenge complete!"
-                      : `${dailyProgress} / ${activeDaily.target} ${activeDaily.unit}`}
+                      ? "Complete · Golden Bite basket earned"
+                      : activeDaily?.detail ?? "A new challenge every day"}
+                  </small>
+                </span>
+                {activeDaily && (
+                  <span className="daily-compact-progress">
+                    {dailyChallenge?.completed
+                      ? "DONE"
+                      : `${dailyProgress} / ${activeDaily.target}`}
+                  </span>
+                )}
+                {activeDaily && (
+                  <span
+                    className="daily-progress-track"
+                    role="progressbar"
+                    aria-label="Daily challenge progress"
+                    aria-valuemin={0}
+                    aria-valuemax={activeDaily.target}
+                    aria-valuenow={dailyProgress}
+                  >
+                    <span
+                      style={{
+                        width: `${(dailyProgress / activeDaily.target) * 100}%`,
+                      }}
+                    />
                   </span>
                 )}
               </div>
-              {dailyChallenge?.completed ? (
-                <span className="daily-reward-pill">🏆 GOLDEN BITE UNLOCKED</span>
-              ) : (
-                <span className="daily-reward-pill">🔒 Golden Bite basket</span>
-              )}
-              {activeDaily && (
-                <div
-                  className="daily-progress-track"
-                  role="progressbar"
-                  aria-label="Daily challenge progress"
-                  aria-valuemin={0}
-                  aria-valuemax={activeDaily.target}
-                  aria-valuenow={dailyProgress}
-                >
-                  <span
-                    style={{
-                      width: `${(dailyProgress / activeDaily.target) * 100}%`,
-                    }}
-                  />
-                </div>
-              )}
+              <button
+                className={`setup-toggle setup-toggle-${selectedMode} ${setupOpen ? "is-open" : ""}`}
+                type="button"
+                aria-expanded={setupOpen}
+                aria-controls="game-setup-options"
+                onClick={() => setSetupOpen((open) => !open)}
+              >
+                <span className="setup-current-mode">
+                  {GAME_MODES.find((mode) => mode.id === selectedMode)?.icon}{" "}
+                  {selectedMode === "zen" ? "Zen mode" : GAME_MODES.find((mode) => mode.id === selectedMode)?.name}
+                </span>
+                <span
+                  className="setup-current-basket"
+                  aria-label={`${activeBasket.name} basket`}
+                  style={{
+                    background: `linear-gradient(160deg, ${activeBasket.rim} 0 25%, ${activeBasket.top} 26%, ${activeBasket.bottom} 100%)`,
+                  }}
+                />
+                <span>{setupOpen ? "Done" : "Customize"}</span>
+                <span className="setup-chevron" aria-hidden="true">
+                  {setupOpen ? "⌃" : "⌄"}
+                </span>
+              </button>
             </div>
 
-            <div className="lobby-section">
-              <div className="lobby-section-title">
-                <span>Choose your mode</span>
-                <span>Switch it up anytime</span>
-              </div>
-              <div className="mode-picker">
-                {GAME_MODES.map((mode) => (
-                  <button
-                    key={mode.id}
-                    className={`mode-option ${selectedMode === mode.id ? "is-selected" : ""}`}
-                    type="button"
-                    onClick={() => selectMode(mode.id)}
-                    aria-pressed={selectedMode === mode.id}
-                  >
-                    <span className="mode-option-icon" aria-hidden="true">
-                      {mode.icon}
-                    </span>
-                    <span className="mode-option-copy">
-                      <strong>{mode.name}</strong>
-                      <small>{mode.description}</small>
-                    </span>
-                    <span className="mode-check" aria-hidden="true">
-                      {selectedMode === mode.id ? "✓" : ""}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="lobby-section basket-section">
-              <div className="lobby-section-title">
-                <span>Choose your basket</span>
-                <span>{unlockedSkins.length} / {BASKET_SKINS.length} unlocked</span>
-              </div>
-              <div className="basket-picker">
-                {BASKET_SKINS.map((skin) => {
-                  const isUnlocked = unlockedSkins.includes(skin.id);
-                  return (
-                    <button
-                      key={skin.id}
-                      className={`basket-option ${selectedSkin === skin.id ? "is-selected" : ""} ${!isUnlocked ? "is-locked" : ""}`}
-                      type="button"
-                      onClick={() => selectSkin(skin.id)}
-                      disabled={!isUnlocked}
-                      aria-pressed={selectedSkin === skin.id}
-                      title={isUnlocked ? skin.description : skin.requirement}
-                    >
-                      <span
-                        className="basket-swatch"
-                        aria-hidden="true"
-                        style={{
-                          background: `linear-gradient(160deg, ${skin.rim} 0 25%, ${skin.top} 26%, ${skin.bottom} 100%)`,
-                        }}
+            {setupOpen && (
+              <div className="lobby-options" id="game-setup-options">
+                <div className="lobby-section">
+                  <div className="lobby-section-title">
+                    <span>Choose your mode</span>
+                    <span>Switch it up anytime</span>
+                  </div>
+                  <div className="mode-picker">
+                    {GAME_MODES.map((mode) => (
+                      <button
+                        key={mode.id}
+                        className={`mode-option mode-option-${mode.id} ${selectedMode === mode.id ? "is-selected" : ""}`}
+                        type="button"
+                        onClick={() => selectMode(mode.id)}
+                        aria-pressed={selectedMode === mode.id}
                       >
-                        {isUnlocked ? "☺" : "🔒"}
-                      </span>
-                      <strong>{skin.name}</strong>
-                      <small>{isUnlocked ? skin.description : skin.requirement}</small>
-                    </button>
-                  );
-                })}
+                        <span className="mode-option-icon" aria-hidden="true">
+                          {mode.icon}
+                        </span>
+                        <span className="mode-option-copy">
+                          <strong>{mode.name}</strong>
+                          <small>{mode.description}</small>
+                        </span>
+                        <span className="mode-check" aria-hidden="true">
+                          {selectedMode === mode.id ? "✓" : ""}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="lobby-section basket-section">
+                  <div className="lobby-section-title">
+                    <span>Choose your basket</span>
+                    <span>{unlockedSkins.length} / {BASKET_SKINS.length} unlocked</span>
+                  </div>
+                  <div className="basket-picker">
+                    {BASKET_SKINS.map((skin) => {
+                      const isUnlocked = unlockedSkins.includes(skin.id);
+                      return (
+                        <button
+                          key={skin.id}
+                          className={`basket-option ${selectedSkin === skin.id ? "is-selected" : ""} ${!isUnlocked ? "is-locked" : ""}`}
+                          type="button"
+                          onClick={() => selectSkin(skin.id)}
+                          disabled={!isUnlocked}
+                          aria-pressed={selectedSkin === skin.id}
+                          title={isUnlocked ? skin.description : skin.requirement}
+                        >
+                          <span
+                            className="basket-swatch"
+                            aria-hidden="true"
+                            style={{
+                              background: `linear-gradient(160deg, ${skin.rim} 0 25%, ${skin.top} 26%, ${skin.bottom} 100%)`,
+                            }}
+                          >
+                            {isUnlocked ? "☺" : "🔒"}
+                          </span>
+                          <strong>{skin.name}</strong>
+                          <small>{isUnlocked ? skin.description : skin.requirement}</small>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </section>
         )}
 
@@ -1317,7 +1346,6 @@ export default function SnackSwipe() {
             <div className="score-tile score-main">
               <span className="tile-label">YOUR SCORE</span>
               <strong
-                key={score}
                 className="score-number"
                 aria-live="polite"
                 aria-label={`Score ${score}`}
