@@ -37,6 +37,7 @@ import {
 
 export type GameSnapshot = {
   speed: number;
+  signedSpeed: number;
   elapsed: number;
   x: number;
   y: number;
@@ -322,6 +323,7 @@ export default class EscapeRouteScene extends Phaser.Scene {
   private emitHud() {
     this.onHudUpdate({
       speed: Math.round(Math.abs(this.vehicle.speed) * 0.31),
+      signedSpeed: this.vehicle.speed,
       elapsed: this.elapsed,
       x: this.vehicle.x,
       y: this.vehicle.y,

@@ -34,6 +34,7 @@ import type {
 
 const INITIAL_SNAPSHOT: GameSnapshot = {
   speed: 0,
+  signedSpeed: 0,
   elapsed: 0,
   x: START.x,
   y: START.y,
@@ -83,16 +84,23 @@ function TouchButton({
   children: ReactNode;
   controllerRef: RefObject<EscapeRouteController | null>;
 }) {
-  const release = () => controllerRef.current?.setTouchControl(control, false);
+  const [pressed, setPressed] = useState(false);
+  const release = () => {
+    setPressed(false);
+    controllerRef.current?.setTouchControl(control, false);
+  };
 
   return (
     <button
       className={`er-touch-button er-touch-${control}`}
       type="button"
       aria-label={label}
+      aria-pressed={pressed}
+      data-pressed={pressed}
       onPointerDown={(event) => {
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
+        setPressed(true);
         controllerRef.current?.setTouchControl(control, true);
       }}
       onPointerUp={release}
@@ -110,6 +118,7 @@ export default function EscapeRoute() {
   const hostRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<EscapeRouteController | null>(null);
   const [snapshot, setSnapshot] = useState(INITIAL_SNAPSHOT);
+  const [mapExpanded, setMapExpanded] = useState(false);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [progressState, setProgressState] = useState<{
@@ -213,7 +222,7 @@ export default function EscapeRoute() {
     getCompletionStars(Math.floor(snapshot.elapsed), snapshot.collisions);
 
   return (
-    <main className="escape-route-shell">
+    <main className="escape-route-shell er-city-shell">
       <div className="er-page">
         <header className="er-header">
           <Link className="er-back-link" href="/" aria-label="Back to games">
@@ -256,6 +265,102 @@ export default function EscapeRoute() {
                 <span>CITY INTERSECTION</span>
                 <span className="er-scene-divider" />
                 <span>23:48</span>
+              </div>
+              <div className="er-mobile-hud">
+                <section className="er-mobile-objective" aria-label="Current objective">
+                  <span className="er-mobile-level">
+                    LEVEL {String(CURRENT_LEVEL).padStart(2, "0")} · CITY INTERSECTION
+                  </span>
+                  <strong>{getObjective(snapshot)}</strong>
+                  <span className="er-mobile-route">{getRouteCallout(snapshot)}</span>
+                  {snapshot.nearSwitch && !snapshot.puzzleActivated && (
+                    <button
+                      className="er-mobile-interact"
+                      type="button"
+                      onClick={() => controllerRef.current?.interact()}
+                    >
+                      ACTIVATE SWITCH
+                    </button>
+                  )}
+                  {ready && progressError && !snapshot.won && (
+                    <span className="er-mobile-progress-error" role="alert">
+                      {progressError}
+                    </span>
+                  )}
+                </section>
+                <div className="er-mobile-right-rail">
+                  <div className="er-mobile-top-actions">
+                    <span className="er-mobile-timer" aria-label={`Elapsed ${formatTime(snapshot.elapsed)}`}>
+                      {formatTime(snapshot.elapsed)}
+                    </span>
+                    <button
+                      className="er-mobile-pause"
+                      type="button"
+                      onClick={togglePause}
+                      disabled={snapshot.won}
+                      aria-label={snapshot.paused ? "Resume game" : "Pause game"}
+                    >
+                      {snapshot.paused ? (
+                        <Play size={16} aria-hidden="true" />
+                      ) : (
+                        <Pause size={16} aria-hidden="true" />
+                      )}
+                    </button>
+                  </div>
+                  <section
+                    className={`er-mobile-navigation${mapExpanded ? " is-expanded" : ""}`}
+                    aria-label="Navigation map"
+                  >
+                    <div className="er-mobile-map-heading">
+                      <span>CITY ROUTE</span>
+                      <button
+                        type="button"
+                        aria-expanded={mapExpanded}
+                        aria-controls="er-mobile-navigation-map"
+                        aria-label={mapExpanded ? "Close expanded navigation map" : "Expand navigation map"}
+                        onClick={() => setMapExpanded((expanded) => !expanded)}
+                      >
+                        {mapExpanded ? "CLOSE" : "EXPAND"}
+                      </button>
+                    </div>
+                    <div id="er-mobile-navigation-map">
+                      <NavigationMap
+                        player={{ x: snapshot.x, y: snapshot.y }}
+                        heading={snapshot.heading}
+                        switchActivated={snapshot.puzzleActivated}
+                      />
+                    </div>
+                    <span className="er-mobile-map-status">
+                      {snapshot.puzzleActivated ? "GATE OPEN · STUDIO AHEAD" : "SWITCH · GATE · STUDIO"}
+                    </span>
+                  </section>
+                </div>
+                <div className="er-mobile-telemetry" aria-label="Vehicle telemetry">
+                  <div className="er-mobile-speed-reading">
+                    <strong>{snapshot.speed}</strong>
+                    <span className="er-mobile-speed-unit">KM/H</span>
+                    <span
+                      className="er-mobile-gear"
+                      aria-label={snapshot.signedSpeed < 0 ? "Reverse" : "Drive"}
+                    >
+                      {snapshot.signedSpeed < 0 ? "R" : "D"}
+                    </span>
+                  </div>
+                  <span className="er-mobile-vehicle-state">
+                    <i />
+                    {snapshot.speed > 4 ? "IN MOTION" : "PARKED"}
+                  </span>
+                </div>
+                <div className="er-mobile-controls" aria-label="Touch driving controls">
+                  <div className="er-mobile-steering">
+                    <TouchButton control="left" label="Steer left" controllerRef={controllerRef}>←</TouchButton>
+                    <TouchButton control="right" label="Steer right" controllerRef={controllerRef}>→</TouchButton>
+                  </div>
+                  <div className="er-mobile-pedals">
+                    <TouchButton control="brake" label="Brake and reverse" controllerRef={controllerRef}>BRAKE</TouchButton>
+                    <TouchButton control="accelerate" label="Accelerate" controllerRef={controllerRef}>DRIVE</TouchButton>
+                  </div>
+                </div>
               </div>
               <div className="er-engine-host" ref={hostRef} />
               {!ready && !loadError && (

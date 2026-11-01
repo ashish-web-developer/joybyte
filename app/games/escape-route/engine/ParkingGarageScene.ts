@@ -36,7 +36,6 @@ import {
 import type { GameSnapshot, TouchControl } from "./EscapeRouteScene";
 
 export type ParkingGarageSnapshot = GameSnapshot & {
-  signedSpeed: number;
   ticketCollected: boolean;
   terminalActivated: boolean;
   nearTicket: boolean;

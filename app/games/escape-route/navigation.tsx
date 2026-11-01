@@ -76,6 +76,7 @@ export function NavigationMap({
         return (
           <line
             key={index}
+            className="er-map-road"
             x1={from.x}
             y1={from.y}
             x2={to.x}
@@ -87,6 +88,7 @@ export function NavigationMap({
         );
       })}
       <line
+        className="er-map-barrier"
         x1={barrierPoint.x - 2.8}
         y1={barrierPoint.y}
         x2={barrierPoint.x + 2.8}
