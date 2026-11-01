@@ -8,7 +8,6 @@ import {
   Pause,
   Play,
   RotateCcw,
-  Star,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
@@ -24,11 +23,21 @@ import {
 } from "./engine/parking-garage-world";
 import type { EscapeRouteController } from "./engine/game";
 import type { ParkingGarageSnapshot } from "./engine/ParkingGarageScene";
-import { EMPTY_PROGRESS, isLevelUnlocked, loadProgress, recordCompletion, saveProgress } from "./engine/progression";
+import {
+  EMPTY_PROGRESS,
+  LEVEL_DEFINITIONS,
+  getCompletionScore,
+  getCompletionStars,
+  isLevelUnlocked,
+  loadProgress,
+  recordCompletion,
+  saveProgress,
+} from "./engine/progression";
 import type { CompletionResult, LevelProgress } from "./engine/progression";
 import { NavigationMap } from "./navigation";
 import type { NavigationLayout } from "./navigation";
 import type { TouchControl } from "./engine/EscapeRouteScene";
+import { LevelResults } from "./results";
 
 const LEVEL_NUMBER = 2;
 const INITIAL_SNAPSHOT: ParkingGarageSnapshot = {
@@ -241,13 +250,18 @@ export default function ParkingGarage() {
   const togglePause = () => {
     controllerRef.current?.setPaused(!snapshot.paused);
   };
-  const starsAwarded = completionResult?.stars ?? 1;
+  const starsAwarded =
+    completionResult?.stars ??
+    getCompletionStars(Math.floor(snapshot.elapsed), snapshot.collisions, LEVEL_NUMBER);
+  const nextLevel = LEVEL_DEFINITIONS.find(
+    (level) => level.id === LEVEL_NUMBER + 1,
+  );
 
   return (
     <main className="escape-route-shell er-garage-shell">
       <div className="er-page">
         <header className="er-header">
-          <Link className="er-back-link" href="/games/escape-route" aria-label="Back to City Intersection">
+          <Link className="er-back-link" href="/games/escape-route/level-01" aria-label="Back to City Intersection">
             <ArrowLeft size={16} aria-hidden="true" />
             <span>BACK TO LEVEL 01</span>
           </Link>
@@ -419,7 +433,7 @@ export default function ParkingGarage() {
                     <button
                       className="er-resume-button"
                       type="button"
-                      onClick={() => router.push("/games/escape-route")}
+                      onClick={() => router.push("/games/escape-route/level-01")}
                     >
                       <ArrowLeft size={14} aria-hidden="true" />
                       PLAY LEVEL 01
@@ -428,64 +442,39 @@ export default function ParkingGarage() {
                 </div>
               )}
               {snapshot.won && (
-                <div className="er-pause-overlay">
-                  <div className="er-pause-card er-completion-card">
-                    <span className="er-pause-kicker">LEVEL 02 · COMPLETE</span>
-                    <h2>Back in daylight.</h2>
-                    <p>
-                      Ticket paid, exit opened, and every tight turn behind you.
-                    </p>
-                    <div
-                      className="er-completion-stars"
-                      aria-label={`${starsAwarded} out of 3 stars`}
-                    >
-                      {Array.from({ length: 3 }, (_, index) => (
-                        <Star
-                          key={index}
-                          size={22}
-                          fill={index < starsAwarded ? "currentColor" : "none"}
-                          className={index < starsAwarded ? "is-earned" : ""}
-                          aria-hidden="true"
-                        />
-                      ))}
-                    </div>
-                    <div className="er-completion-stats">
-                      <div>
-                        <span>TIME</span>
-                        <strong>{formatTime(snapshot.elapsed)}</strong>
-                      </div>
-                      <div>
-                        <span>COLLISIONS</span>
-                        <strong>{snapshot.collisions}</strong>
-                      </div>
-                      {completionResult?.isNewBestTime && (
-                        <span className="er-new-best">NEW BEST</span>
-                      )}
-                    </div>
-                    {progressError && (
-                      <p className="er-progress-error" role="alert">
-                        {progressError}
-                      </p>
-                    )}
-                    <div className="er-completion-actions">
-                      <button
-                        className="er-completion-restart"
-                        type="button"
-                        onClick={() => controllerRef.current?.restart()}
-                      >
-                        <RotateCcw size={14} aria-hidden="true" />
-                        RESTART LEVEL
-                      </button>
-                      <button
-                        className="er-resume-button"
-                        type="button"
-                        onClick={() => router.push("/games/escape-route")}
-                      >
-                        <ArrowLeft size={14} aria-hidden="true" />
-                        CITY INTERSECTION
-                      </button>
-                    </div>
-                  </div>
+                <div
+                  className="er-pause-overlay"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Mission completed"
+                >
+                  <LevelResults
+                    levelName="Underground Parking"
+                    elapsed={snapshot.elapsed}
+                    collisions={snapshot.collisions}
+                    score={
+                      completionResult?.score ??
+                      getCompletionScore(
+                        LEVEL_NUMBER,
+                        Math.floor(snapshot.elapsed),
+                        snapshot.collisions,
+                      )
+                    }
+                    stars={starsAwarded}
+                    previousBestScore={
+                      completionResult
+                        ? completionResult.previousBestScore
+                        : (progress.bestScores[LEVEL_NUMBER] ?? null)
+                    }
+                    isNewRecord={completionResult?.isNewRecord ?? false}
+                    nextLevelHref={
+                      nextLevel && isLevelUnlocked(progress, nextLevel.id)
+                        ? nextLevel.route
+                        : undefined
+                    }
+                    progressError={progressError}
+                    onRetry={() => controllerRef.current?.restart()}
+                  />
                 </div>
               )}
               {snapshot.paused && !snapshot.won && (

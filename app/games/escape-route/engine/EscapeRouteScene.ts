@@ -77,7 +77,7 @@ export default class EscapeRouteScene extends Phaser.Scene {
   private hudAccumulator = 0;
   private routeIndex = 0;
   private collisions = 0;
-  private collisionCooldown = 0;
+  private collisionActive = false;
   private paused = false;
   private won = false;
   private nearSwitch = false;
@@ -126,7 +126,6 @@ export default class EscapeRouteScene extends Phaser.Scene {
     const dt = Math.min(deltaSeconds, 0.04);
     this.elapsed += dt;
     this.hudAccumulator += dt;
-    this.collisionCooldown = Math.max(0, this.collisionCooldown - dt);
     this.nearSwitch = this.puzzleSwitch.isNearby(this.vehicle);
     this.updateRouteProgress();
 
@@ -146,16 +145,17 @@ export default class EscapeRouteScene extends Phaser.Scene {
       (corner) => isBlocked(corner) || this.roadBarrier.blocks(corner),
     );
 
-    if (offRoad || collision) {
-      if (this.collisionCooldown === 0) {
-        this.collisions += 1;
-        this.collisionCooldown = 1;
-      }
+    const blocked = offRoad || collision;
+    if (blocked) {
+      if (!this.collisionActive) this.collisions += 1;
+      this.collisionActive = true;
       this.vehicle.x = previous.x;
       this.vehicle.y = previous.y;
       this.vehicle.angle = previous.angle;
       this.vehicle.speed *= collision ? -0.16 : 0.12;
       this.vehicle.lateralSpeed *= -0.18;
+    } else {
+      this.collisionActive = false;
     }
 
     this.car.setPosition(this.vehicle.x, this.vehicle.y);
@@ -233,7 +233,7 @@ export default class EscapeRouteScene extends Phaser.Scene {
     this.hudAccumulator = 0;
     this.routeIndex = 0;
     this.collisions = 0;
-    this.collisionCooldown = 0;
+    this.collisionActive = false;
     this.paused = false;
     this.won = false;
     this.nearSwitch = false;

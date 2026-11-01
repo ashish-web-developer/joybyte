@@ -1,15 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
-  ArrowRight,
   ArrowUpRight,
   Pause,
   Play,
   RotateCcw,
-  Star,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
@@ -20,7 +17,8 @@ import { NavigationMap } from "./navigation";
 import {
   CURRENT_LEVEL,
   EMPTY_PROGRESS,
-  NEXT_LEVEL,
+  LEVEL_DEFINITIONS,
+  getCompletionScore,
   getCompletionStars,
   isLevelUnlocked,
   loadProgress,
@@ -31,6 +29,7 @@ import type {
   CompletionResult,
   LevelProgress,
 } from "./engine/progression";
+import { LevelResults } from "./results";
 
 const INITIAL_SNAPSHOT: GameSnapshot = {
   speed: 0,
@@ -114,7 +113,6 @@ function TouchButton({
 }
 
 export default function EscapeRoute() {
-  const router = useRouter();
   const hostRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<EscapeRouteController | null>(null);
   const [snapshot, setSnapshot] = useState(INITIAL_SNAPSHOT);
@@ -220,6 +218,9 @@ export default function EscapeRoute() {
   const starsAwarded =
     completionResult?.stars ??
     getCompletionStars(Math.floor(snapshot.elapsed), snapshot.collisions);
+  const nextLevel = LEVEL_DEFINITIONS.find(
+    (level) => level.id === CURRENT_LEVEL + 1,
+  );
 
   return (
     <main className="escape-route-shell er-city-shell">
@@ -375,71 +376,39 @@ export default function EscapeRoute() {
                 </div>
               )}
               {snapshot.won && (
-                <div className="er-pause-overlay">
-                  <div className="er-pause-card er-completion-card">
-                        <span className="er-pause-kicker">
-                          LEVEL {String(CURRENT_LEVEL).padStart(2, "0")} · COMPLETE
-                        </span>
-                        <h2>City cleared.</h2>
-                        <p>
-                          You found the switch, opened the gate, and made it to
-                          the studio. The city can keep its secrets.
-                        </p>
-                        <div
-                          className="er-completion-stars"
-                          aria-label={`${starsAwarded} out of 3 stars`}
-                        >
-                          {Array.from({ length: 3 }, (_, index) => (
-                            <Star
-                              key={index}
-                              size={22}
-                              fill={index < starsAwarded ? "currentColor" : "none"}
-                              className={index < starsAwarded ? "is-earned" : ""}
-                              aria-hidden="true"
-                            />
-                          ))}
-                        </div>
-                        <div className="er-completion-stats">
-                          <div>
-                            <span>TIME</span>
-                            <strong>{formatTime(snapshot.elapsed)}</strong>
-                          </div>
-                          <div>
-                            <span>COLLISIONS</span>
-                            <strong>{snapshot.collisions}</strong>
-                          </div>
-                          {completionResult?.isNewBestTime && (
-                            <span className="er-new-best">NEW BEST</span>
-                          )}
-                        </div>
-                        {progressError && (
-                          <p className="er-progress-error" role="alert">
-                            {progressError}
-                          </p>
-                        )}
-                        <div className="er-completion-actions">
-                          <button
-                            className="er-completion-restart"
-                            type="button"
-                            onClick={() => controllerRef.current?.restart()}
-                          >
-                            <RotateCcw size={14} aria-hidden="true" />
-                            RESTART LEVEL
-                          </button>
-                          {isLevelUnlocked(progress, NEXT_LEVEL) && (
-                            <button
-                              className="er-resume-button"
-                              type="button"
-                              onClick={() =>
-                                router.push("/games/escape-route/level-02")
-                              }
-                            >
-                              NEXT LEVEL
-                              <ArrowRight size={14} aria-hidden="true" />
-                            </button>
-                          )}
-                        </div>
-                  </div>
+                <div
+                  className="er-pause-overlay"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Mission completed"
+                >
+                  <LevelResults
+                    levelName="City Intersection"
+                    elapsed={snapshot.elapsed}
+                    collisions={snapshot.collisions}
+                    score={
+                      completionResult?.score ??
+                      getCompletionScore(
+                        CURRENT_LEVEL,
+                        Math.floor(snapshot.elapsed),
+                        snapshot.collisions,
+                      )
+                    }
+                    stars={starsAwarded}
+                    previousBestScore={
+                      completionResult
+                        ? completionResult.previousBestScore
+                        : (progress.bestScores[CURRENT_LEVEL] ?? null)
+                    }
+                    isNewRecord={completionResult?.isNewRecord ?? false}
+                    nextLevelHref={
+                      nextLevel && isLevelUnlocked(progress, nextLevel.id)
+                        ? nextLevel.route
+                        : undefined
+                    }
+                    progressError={progressError}
+                    onRetry={() => controllerRef.current?.restart()}
+                  />
                 </div>
               )}
               {snapshot.paused && !snapshot.won && (

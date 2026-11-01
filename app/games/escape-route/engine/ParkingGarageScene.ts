@@ -68,7 +68,7 @@ export default class ParkingGarageScene extends Phaser.Scene {
   private elapsed = 0;
   private hudAccumulator = 0;
   private collisions = 0;
-  private collisionCooldown = 0;
+  private collisionActive = false;
   private paused = false;
   private won = false;
   private nearTicket = false;
@@ -118,7 +118,6 @@ export default class ParkingGarageScene extends Phaser.Scene {
     const dt = Math.min(deltaMilliseconds / 1000, 0.04);
     this.elapsed += dt;
     this.hudAccumulator += dt;
-    this.collisionCooldown = Math.max(0, this.collisionCooldown - dt);
     this.nearTicket = this.ticket.isNearby(this.vehicle);
     this.nearTerminal = this.terminal.isNearby(this.vehicle);
 
@@ -145,16 +144,17 @@ export default class ParkingGarageScene extends Phaser.Scene {
           isGarageObstacle(point) || this.barrier.blocks(point),
       );
 
-    if (offRoad || collision) {
-      if (this.collisionCooldown === 0) {
-        this.collisions += 1;
-        this.collisionCooldown = 1;
-      }
+    const blocked = offRoad || collision;
+    if (blocked) {
+      if (!this.collisionActive) this.collisions += 1;
+      this.collisionActive = true;
       this.vehicle.x = previous.x;
       this.vehicle.y = previous.y;
       this.vehicle.angle = previous.angle;
       this.vehicle.speed *= collision ? -0.12 : 0.1;
       this.vehicle.lateralSpeed *= -0.16;
+    } else {
+      this.collisionActive = false;
     }
 
     this.car.setPosition(this.vehicle.x, this.vehicle.y);
@@ -253,7 +253,7 @@ export default class ParkingGarageScene extends Phaser.Scene {
     this.elapsed = 0;
     this.hudAccumulator = 0;
     this.collisions = 0;
-    this.collisionCooldown = 0;
+    this.collisionActive = false;
     this.paused = false;
     this.won = false;
     this.nearTicket = false;

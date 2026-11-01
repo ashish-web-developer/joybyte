@@ -87,7 +87,7 @@ export default function Home() {
           </div>
           <Link
             className="mt-5 inline-flex shrink-0 items-center gap-3 rounded-xl bg-[#d5ad6e] px-5 py-3 text-sm font-bold text-[#1d211e] transition hover:-translate-y-0.5 hover:bg-[#e2bd82] sm:mt-0"
-            href="/games/escape-route"
+            href="/games/escape-route/level-01"
           >
             Drive Escape Route <span aria-hidden="true">↗</span>
           </Link>

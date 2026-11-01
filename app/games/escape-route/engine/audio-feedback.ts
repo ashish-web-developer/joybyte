@@ -86,6 +86,67 @@ export function playBarrierSound() {
   ]);
 }
 
+export function playBridgeRepairSound() {
+  playTones([
+    {
+      frequency: 92,
+      endFrequency: 154,
+      start: 0,
+      duration: 0.8,
+      volume: 0.045,
+      type: "triangle",
+    },
+    {
+      frequency: 248,
+      endFrequency: 440,
+      start: 0.28,
+      duration: 0.58,
+      volume: 0.025,
+      type: "sine",
+    },
+  ]);
+}
+
+export function playRockfallWarningSound() {
+  playTones([
+    {
+      frequency: 660,
+      start: 0,
+      duration: 0.18,
+      volume: 0.035,
+      type: "square",
+    },
+    {
+      frequency: 660,
+      start: 0.32,
+      duration: 0.18,
+      volume: 0.035,
+      type: "square",
+    },
+  ]);
+}
+
+export function playRockImpactSound() {
+  playTones([
+    {
+      frequency: 105,
+      endFrequency: 42,
+      start: 0,
+      duration: 0.58,
+      volume: 0.055,
+      type: "triangle",
+    },
+    {
+      frequency: 71,
+      endFrequency: 36,
+      start: 0.08,
+      duration: 0.48,
+      volume: 0.035,
+      type: "sawtooth",
+    },
+  ]);
+}
+
 export function playArrivalSound() {
   playTones([
     { frequency: 523.25, start: 0, duration: 0.2, volume: 0.035 },

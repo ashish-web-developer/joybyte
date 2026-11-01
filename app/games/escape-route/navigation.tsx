@@ -14,8 +14,13 @@ export type NavigationLayout = {
   roads: RoadSegment[];
   barrier: Point;
   destination: Point;
+  activeDestination?: Point;
+  activeDestinationLabel?: string;
   primaryMarker: Point;
   secondaryMarker?: Point;
+  barrierAngle?: number;
+  checkpoints?: Array<{ point: Point; activated: boolean }>;
+  collectible?: { point: Point; collected: boolean };
 };
 
 const CITY_LAYOUT: NavigationLayout = {
@@ -33,6 +38,7 @@ export function NavigationMap({
   switchActivated,
   primaryActivated = switchActivated,
   secondaryActivated = switchActivated,
+  barrierActivated = switchActivated,
   layout = CITY_LAYOUT,
   ariaLabel = "City map showing roads, your heading, the switch, barrier, and studio",
 }: {
@@ -41,6 +47,7 @@ export function NavigationMap({
   switchActivated: boolean;
   primaryActivated?: boolean;
   secondaryActivated?: boolean;
+  barrierActivated?: boolean;
   layout?: NavigationLayout;
   ariaLabel?: string;
 }) {
@@ -61,6 +68,13 @@ export function NavigationMap({
     layout.destination.x,
     layout.destination.y,
   );
+  const activeDestinationPoint = layout.activeDestination
+    ? mapPoint(layout.activeDestination.x, layout.activeDestination.y)
+    : null;
+  const barrierHalfLength = 2.8;
+  const barrierAngle = layout.barrierAngle ?? 0;
+  const barrierDx = Math.cos(barrierAngle) * barrierHalfLength;
+  const barrierDy = Math.sin(barrierAngle) * barrierHalfLength;
 
   return (
     <svg
@@ -89,11 +103,11 @@ export function NavigationMap({
       })}
       <line
         className="er-map-barrier"
-        x1={barrierPoint.x - 2.8}
-        y1={barrierPoint.y}
-        x2={barrierPoint.x + 2.8}
-        y2={barrierPoint.y}
-        stroke={switchActivated ? "#91a47f" : "#c06d5a"}
+        x1={barrierPoint.x - barrierDx}
+        y1={barrierPoint.y - barrierDy}
+        x2={barrierPoint.x + barrierDx}
+        y2={barrierPoint.y + barrierDy}
+        stroke={barrierActivated ? "#91a47f" : "#c06d5a"}
         strokeWidth="1.8"
         strokeLinecap="round"
       />
@@ -111,12 +125,60 @@ export function NavigationMap({
           fill={secondaryActivated ? "#a8bd91" : "#92b0b1"}
         />
       )}
+      {layout.checkpoints?.map(({ point, activated }, index) => {
+        const checkpoint = mapPoint(point.x, point.y);
+        return (
+          <rect
+            key={`checkpoint-${index}`}
+            x={checkpoint.x - 1.1}
+            y={checkpoint.y - 1.1}
+            width="2.2"
+            height="2.2"
+            rx=".4"
+            fill={activated ? "#a8bd91" : "#d9d4c2"}
+            stroke="#222a29"
+            strokeWidth=".5"
+          />
+        );
+      })}
+      {layout.collectible?.collected && (
+        <path
+          d={`M ${mapPoint(layout.collectible.point.x, layout.collectible.point.y).x} ${mapPoint(layout.collectible.point.x, layout.collectible.point.y).y - 2} l 2 2 -2 2 -2 -2 z`}
+          fill="#ebcf7d"
+          stroke="#222a29"
+          strokeWidth=".5"
+        />
+      )}
       <circle
         cx={destinationPoint.x}
         cy={destinationPoint.y}
         r="2.2"
-        fill={switchActivated ? "#d58c64" : "#7d8179"}
+        fill={barrierActivated ? "#d58c64" : "#7d8179"}
       />
+      {activeDestinationPoint && (
+        <g
+          className="er-map-active-destination"
+          aria-label={`Next destination: ${layout.activeDestinationLabel ?? "mission objective"}`}
+        >
+          <title>
+            {`Next destination: ${layout.activeDestinationLabel ?? "mission objective"}`}
+          </title>
+          <circle
+            cx={activeDestinationPoint.x}
+            cy={activeDestinationPoint.y}
+            r="4.3"
+            fill="rgba(240, 199, 126, .16)"
+            stroke="#f0c77e"
+            strokeWidth=".8"
+          />
+          <path
+            d={`M ${activeDestinationPoint.x} ${activeDestinationPoint.y - 2.4} l 2.4 2.4 -2.4 2.4 -2.4 -2.4 z`}
+            fill="#f0c77e"
+            stroke="#222a29"
+            strokeWidth=".5"
+          />
+        </g>
+      )}
       <circle cx={carPoint.x} cy={carPoint.y} r="4.3" fill="#222a29" />
       <g
         transform={`translate(${carPoint.x} ${carPoint.y}) rotate(${(heading * 180) / Math.PI})`}

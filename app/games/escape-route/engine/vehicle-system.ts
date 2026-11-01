@@ -84,8 +84,10 @@ export function stepVehicle(
   vehicle: Vehicle,
   controls: DrivingControls,
   deltaSeconds: number,
+  grip = 1,
 ) {
   const dt = Math.min(deltaSeconds, 0.04);
+  const surfaceGrip = Math.max(0.35, Math.min(grip, 1));
   const throttle = controls.accelerate ? 1 : 0;
   const braking = controls.brake ? 1 : 0;
 
@@ -117,10 +119,11 @@ export function stepVehicle(
   }
 
   const lateralAcceleration =
-    -vehicle.lateralSpeed * 4.8 +
-    -steer * Math.min(Math.abs(vehicle.speed) * 0.12, 38);
+    -vehicle.lateralSpeed * 4.8 * surfaceGrip +
+    -steer * Math.min(Math.abs(vehicle.speed) * 0.12, 38) *
+      (0.7 + surfaceGrip * 0.3);
   vehicle.lateralSpeed += lateralAcceleration * dt;
-  vehicle.lateralSpeed *= Math.exp(-2.2 * dt);
+  vehicle.lateralSpeed *= Math.exp(-(1.1 + 1.1 * surfaceGrip) * dt);
   vehicle.lateralSpeed = Math.max(-55, Math.min(55, vehicle.lateralSpeed));
 
   const forwardX = Math.cos(vehicle.angle);
