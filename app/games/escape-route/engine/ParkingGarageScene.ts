@@ -33,6 +33,11 @@ import {
   type DrivingControls,
   type Vehicle,
 } from "./vehicle-system";
+import {
+  addPulsingGlow,
+  drawRoadNetwork,
+  RoadSkidTrails,
+} from "./road-rendering";
 import type { GameSnapshot, TouchControl } from "./EscapeRouteScene";
 
 export type ParkingGarageSnapshot = GameSnapshot & {
@@ -44,6 +49,7 @@ export type ParkingGarageSnapshot = GameSnapshot & {
 
 export default class ParkingGarageScene extends Phaser.Scene {
   private vehicle!: Vehicle;
+  private skidTrails!: RoadSkidTrails;
   private car!: Phaser.GameObjects.Container;
   private ticket = new ParkingTicket();
   private terminal = new PaymentTerminal();
@@ -96,6 +102,7 @@ export default class ParkingGarageScene extends Phaser.Scene {
       GARAGE_START.angle,
     );
     this.car = this.createPlayerCar();
+    this.skidTrails = new RoadSkidTrails(this, 1.5);
     this.cameras.main.setBounds(0, 0, GARAGE_WIDTH, GARAGE_HEIGHT);
     this.cameras.main.setZoom(1);
     this.cameras.main.startFollow(this.car, true, 0.075, 0.075);
@@ -159,6 +166,7 @@ export default class ParkingGarageScene extends Phaser.Scene {
 
     this.car.setPosition(this.vehicle.x, this.vehicle.y);
     this.car.setRotation(this.vehicle.angle);
+    this.skidTrails.update(this.vehicle, dt);
 
     if (
       this.barrier.isOpen &&
@@ -250,6 +258,7 @@ export default class ParkingGarageScene extends Phaser.Scene {
       GARAGE_START.y,
       GARAGE_START.angle,
     );
+    this.skidTrails.reset();
     this.elapsed = 0;
     this.hudAccumulator = 0;
     this.collisions = 0;
@@ -372,25 +381,13 @@ export default class ParkingGarageScene extends Phaser.Scene {
     graphics.lineStyle(3, 0xc3bca9, 0.42);
     graphics.strokeRect(80, 90, 1640, 1230);
 
-    for (const road of GARAGE_ROADS) {
-      graphics.lineStyle(road.width + 20, 0x777a74, 0.8);
-      graphics.lineBetween(road.from.x, road.from.y, road.to.x, road.to.y);
-      graphics.fillStyle(0x626662, 1);
-      graphics.fillCircle(road.from.x, road.from.y, (road.width + 20) / 2);
-      graphics.fillCircle(road.to.x, road.to.y, (road.width + 20) / 2);
-      graphics.lineStyle(road.width, 0x535754, 1);
-      graphics.lineBetween(road.from.x, road.from.y, road.to.x, road.to.y);
-      graphics.fillStyle(0x535754, 1);
-      graphics.fillCircle(road.from.x, road.from.y, road.width / 2);
-      graphics.fillCircle(road.to.x, road.to.y, road.width / 2);
-      graphics.lineStyle(2, 0x858980, 0.42);
-      graphics.lineBetween(
-        road.from.x,
-        road.from.y,
-        road.to.x,
-        road.to.y,
-      );
-    }
+    drawRoadNetwork(graphics, GARAGE_ROADS, {
+      shoulderColor: 0x626662,
+      shoulderWidth: 20,
+      asphaltColor: 0x535754,
+      wornColor: 0x656963,
+      edgeColor: 0x858980,
+    });
 
     this.drawParkingBays(graphics);
     this.drawDirectionArrows(graphics);
@@ -562,6 +559,16 @@ export default class ParkingGarageScene extends Phaser.Scene {
       graphics.fillCircle(light.x, light.y, 53);
       graphics.fillStyle(0xe9ddb7, 0.56);
       graphics.fillCircle(light.x, light.y, 4);
+      addPulsingGlow(
+        this,
+        light.x,
+        light.y,
+        34,
+        0xe7d8aa,
+        1,
+        2100,
+        Math.round(light.x + light.y) % 700,
+      );
     }
   }
 

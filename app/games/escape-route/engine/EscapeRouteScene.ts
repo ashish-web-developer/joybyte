@@ -34,6 +34,11 @@ import {
   type DrivingControls,
   type Vehicle,
 } from "./vehicle-system";
+import {
+  addPulsingGlow,
+  drawRoadNetwork,
+  RoadSkidTrails,
+} from "./road-rendering";
 
 export type GameSnapshot = {
   speed: number;
@@ -55,6 +60,7 @@ export type TouchControl = keyof DrivingControls;
 
 export default class EscapeRouteScene extends Phaser.Scene {
   private vehicle!: Vehicle;
+  private skidTrails!: RoadSkidTrails;
   private car!: Phaser.GameObjects.Container;
   private puzzleSwitch = new PuzzleSwitch(SWITCH);
   private roadBarrier = new RoadBarrier(BARRIER);
@@ -101,6 +107,7 @@ export default class EscapeRouteScene extends Phaser.Scene {
     this.drawPuzzleObjects();
     this.vehicle = createVehicle(START.x, START.y, START.angle);
     this.car = this.createPlayerCar();
+    this.skidTrails = new RoadSkidTrails(this, 1.5);
     this.cameras.main.setBounds(0, 0, MAP_WIDTH, MAP_HEIGHT);
     this.cameras.main.setZoom(1);
     this.cameras.main.startFollow(this.car, true, 0.075, 0.075);
@@ -160,6 +167,7 @@ export default class EscapeRouteScene extends Phaser.Scene {
 
     this.car.setPosition(this.vehicle.x, this.vehicle.y);
     this.car.setRotation(this.vehicle.angle);
+    this.skidTrails.update(this.vehicle, dt);
 
     if (
       this.roadBarrier.isOpen &&
@@ -229,6 +237,7 @@ export default class EscapeRouteScene extends Phaser.Scene {
 
   restart() {
     this.vehicle = createVehicle(START.x, START.y, START.angle);
+    this.skidTrails.reset();
     this.elapsed = 0;
     this.hudAccumulator = 0;
     this.routeIndex = 0;
@@ -361,9 +370,14 @@ export default class EscapeRouteScene extends Phaser.Scene {
       ground.fillCircle(x, y, radius);
     }
 
-    this.drawSidewalks(ground);
-    this.drawRoadSurfaces(ground);
-    this.drawRoadMarkings(ground);
+    drawRoadNetwork(ground, ROAD_SEGMENTS, {
+      shoulderColor: 0x74796f,
+      shoulderWidth: 18,
+      asphaltColor: 0x414748,
+      wornColor: 0x555b5a,
+      edgeColor: 0xb8bdb6,
+      centerMarkColor: 0xd4ba76,
+    });
     this.drawParkingAreas(ground);
     this.drawStreetFixtures(ground);
     this.drawBuildings(ground);
@@ -375,103 +389,20 @@ export default class EscapeRouteScene extends Phaser.Scene {
       MAP_HEIGHT / 2,
       "escape-route-city",
     );
+    STREETLIGHTS.forEach((light, index) => {
+      if (index % 3 !== 0) return;
+      addPulsingGlow(
+        this,
+        light.x + 12,
+        light.y - 25,
+        19,
+        0xffd98a,
+        1,
+        1500 + (index % 4) * 170,
+        index * 90,
+      );
+    });
     this.drawParkedCars();
-  }
-
-  private drawSidewalks(graphics: Phaser.GameObjects.Graphics) {
-    ROAD_SEGMENTS.forEach((road) => {
-      const sidewalkWidth = road.width + 34;
-      graphics.lineStyle(sidewalkWidth, 0x827f72, 1);
-      graphics.lineBetween(road.from.x, road.from.y, road.to.x, road.to.y);
-      graphics.fillStyle(0x827f72, 1);
-      graphics.fillCircle(road.from.x, road.from.y, sidewalkWidth / 2);
-      graphics.fillCircle(road.to.x, road.to.y, sidewalkWidth / 2);
-      graphics.lineStyle(2, 0xa59c87, 0.42);
-      graphics.lineBetween(road.from.x, road.from.y, road.to.x, road.to.y);
-    });
-  }
-
-  private drawRoadSurfaces(graphics: Phaser.GameObjects.Graphics) {
-    ROAD_SEGMENTS.forEach((road) => {
-      graphics.lineStyle(road.width + 8, 0x363c3d, 1);
-      graphics.lineBetween(road.from.x, road.from.y, road.to.x, road.to.y);
-      graphics.fillStyle(0x363c3d, 1);
-      graphics.fillCircle(road.from.x, road.from.y, (road.width + 8) / 2);
-      graphics.fillCircle(road.to.x, road.to.y, (road.width + 8) / 2);
-      graphics.lineStyle(road.width, 0x414748, 1);
-      graphics.lineBetween(road.from.x, road.from.y, road.to.x, road.to.y);
-      graphics.fillStyle(0x414748, 1);
-      graphics.fillCircle(road.from.x, road.from.y, road.width / 2);
-      graphics.fillCircle(road.to.x, road.to.y, road.width / 2);
-    });
-
-    let seed = 9821;
-    const random = () => {
-      seed = (seed * 1103515245 + 12345) % 2147483648;
-      return seed / 2147483648;
-    };
-    graphics.fillStyle(0x8e948d, 0.16);
-    for (let index = 0; index < 1250; index += 1) {
-      const road = ROAD_SEGMENTS[Math.floor(random() * ROAD_SEGMENTS.length)];
-      const t = random();
-      const centerX = road.from.x + (road.to.x - road.from.x) * t;
-      const centerY = road.from.y + (road.to.y - road.from.y) * t;
-      const offset = (random() - 0.5) * road.width * 0.78;
-      const length = Math.hypot(
-        road.to.x - road.from.x,
-        road.to.y - road.from.y,
-      );
-      const normalX = -(road.to.y - road.from.y) / length;
-      const normalY = (road.to.x - road.from.x) / length;
-      graphics.fillCircle(
-        centerX + normalX * offset,
-        centerY + normalY * offset,
-        0.7 + random() * 1.4,
-      );
-    }
-  }
-
-  private drawRoadMarkings(graphics: Phaser.GameObjects.Graphics) {
-    ROAD_SEGMENTS.forEach((road, index) => {
-      const dx = road.to.x - road.from.x;
-      const dy = road.to.y - road.from.y;
-      const length = Math.hypot(dx, dy);
-      const ux = dx / length;
-      const uy = dy / length;
-      const nx = -uy;
-      const ny = ux;
-      const dashLength = 28;
-      const gap = 26;
-      const endPadding = index < 4 ? 55 : 30;
-
-      for (let distance = endPadding; distance < length - endPadding; distance += dashLength + gap) {
-        const end = Math.min(distance + dashLength, length - endPadding);
-        const x1 = road.from.x + ux * distance;
-        const y1 = road.from.y + uy * distance;
-        const x2 = road.from.x + ux * end;
-        const y2 = road.from.y + uy * end;
-
-        graphics.lineStyle(2, 0xd4ba76, 0.88);
-        graphics.lineBetween(x1 + nx * 4, y1 + ny * 4, x2 + nx * 4, y2 + ny * 4);
-        graphics.lineBetween(x1 - nx * 4, y1 - ny * 4, x2 - nx * 4, y2 - ny * 4);
-
-        if (road.width >= 160) {
-          graphics.lineStyle(2, 0xb8bdb6, 0.5);
-          graphics.lineBetween(
-            x1 + nx * road.width * 0.34,
-            y1 + ny * road.width * 0.34,
-            x2 + nx * road.width * 0.34,
-            y2 + ny * road.width * 0.34,
-          );
-          graphics.lineBetween(
-            x1 - nx * road.width * 0.34,
-            y1 - ny * road.width * 0.34,
-            x2 - nx * road.width * 0.34,
-            y2 - ny * road.width * 0.34,
-          );
-        }
-      }
-    });
   }
 
   private drawParkingAreas(graphics: Phaser.GameObjects.Graphics) {

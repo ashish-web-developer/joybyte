@@ -3,6 +3,7 @@ import {
   BRIDGE_BARRIER,
   BRIDGE_PANEL,
   BRIDGE_SPAN,
+  buildMountainRoadPath,
   CHECKPOINTS,
   DAMAGED_GUARDRAILS,
   HIDDEN_CACHE,
@@ -13,6 +14,7 @@ import {
   MOUNTAIN_EXIT,
   MOUNTAIN_HEIGHT,
   MOUNTAIN_ROADS,
+  MOUNTAIN_ROAD_CENTRELINES,
   MOUNTAIN_START,
   MOUNTAIN_WIDTH,
   POWER_SWITCH_A,
@@ -22,6 +24,7 @@ import {
   getForestTrees,
 } from "./mountain-pass-world";
 import type { RockfallConfig } from "./mountain-pass-world";
+import type { Point } from "./world";
 import { BridgeRepair, HiddenCache, MountainPowerSwitch } from "./mountain-puzzle";
 import { RoadBarrier } from "./puzzle-objects";
 import {
@@ -56,6 +59,13 @@ type Rockfall = {
   ring: Phaser.GameObjects.Graphics;
   message: Phaser.GameObjects.Text;
   rock: Phaser.GameObjects.Container;
+  warningLamp: Phaser.GameObjects.Container;
+};
+
+type SkidMark = {
+  from: Point;
+  to: Point;
+  life: number;
 };
 
 export type MountainPassSnapshot = GameSnapshot & {
@@ -84,6 +94,69 @@ const CHECKPOINT_ANGLES = [
   (-3 * Math.PI) / 4,
   -Math.PI / 3,
 ];
+const RIVER_CENTERLINE: Point[] = [
+  { x: 2030, y: 790 },
+  { x: 2070, y: 930 },
+  { x: 2010, y: 1070 },
+  { x: 2105, y: 1220 },
+  { x: 2050, y: 1390 },
+];
+
+function getPolylineLength(points: Point[]) {
+  let length = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    length += Phaser.Math.Distance.Between(
+      points[index - 1].x,
+      points[index - 1].y,
+      points[index].x,
+      points[index].y,
+    );
+  }
+  return length;
+}
+
+function pointAtPolylineDistance(points: Point[], distance: number): Point {
+  let remaining = distance;
+  for (let index = 1; index < points.length; index += 1) {
+    const from = points[index - 1];
+    const to = points[index];
+    const length = Phaser.Math.Distance.Between(from.x, from.y, to.x, to.y);
+    if (remaining <= length || index === points.length - 1) {
+      const progress = length === 0 ? 0 : Phaser.Math.Clamp(remaining / length, 0, 1);
+      return {
+        x: Phaser.Math.Linear(from.x, to.x, progress),
+        y: Phaser.Math.Linear(from.y, to.y, progress),
+      };
+    }
+    remaining -= length;
+  }
+  return points[points.length - 1];
+}
+
+function offsetPolyline(points: Point[], offset: number): Point[] {
+  return points.map((point, index) => {
+    const before = points[Math.max(0, index - 1)];
+    const after = points[Math.min(points.length - 1, index + 1)];
+    const dx = after.x - before.x;
+    const dy = after.y - before.y;
+    const length = Math.hypot(dx, dy) || 1;
+    return {
+      x: point.x - (dy / length) * offset,
+      y: point.y + (dx / length) * offset,
+    };
+  });
+}
+
+function getRockVertices(x: number, y: number, radius: number, seed: number) {
+  return Array.from({ length: 9 }, (_, index) => {
+    const angle = (index / 9) * Math.PI * 2 + seed * 0.19;
+    const scale = 0.76 + ((index * 7 + seed * 3) % 5) * 0.035;
+    return {
+      x: x + Math.cos(angle) * radius * scale,
+      y: y + Math.sin(angle) * radius * scale,
+    };
+  });
+}
 
 export default class MountainPassScene extends Phaser.Scene {
   private vehicle!: Vehicle;
@@ -105,6 +178,14 @@ export default class MountainPassScene extends Phaser.Scene {
   private checkpointIndicators: Phaser.GameObjects.Graphics[] = [];
   private checkpointLabels: Phaser.GameObjects.Text[] = [];
   private hazards: Rockfall[] = [];
+  private swayingTrees: Point[] = [];
+  private waterGlints: Phaser.GameObjects.Graphics[] = [];
+  private dustEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
+  private skidGraphics!: Phaser.GameObjects.Graphics;
+  private skidMarks: SkidMark[] = [];
+  private previousSkidPoints: [Point, Point] | null = null;
+  private dustAccumulator = 0;
+  private skidRenderAccumulator = 0;
   private touchControls: DrivingControls = {
     accelerate: false,
     brake: false,
@@ -155,6 +236,7 @@ export default class MountainPassScene extends Phaser.Scene {
       MOUNTAIN_START.angle,
     );
     this.car = this.createPlayerCar();
+    this.createDustEmitter();
     this.cameras.main.setBounds(0, 0, MOUNTAIN_WIDTH, MOUNTAIN_HEIGHT);
     this.cameras.main.setZoom(1);
     this.cameras.main.startFollow(this.car, true, 0.075, 0.075);
@@ -236,6 +318,7 @@ export default class MountainPassScene extends Phaser.Scene {
 
     this.car.setPosition(this.vehicle.x, this.vehicle.y);
     this.car.setRotation(this.vehicle.angle);
+    this.updateEnvironmentEffects(dt);
     this.updateNearbyState();
 
     if (
@@ -351,6 +434,12 @@ export default class MountainPassScene extends Phaser.Scene {
     this.checkpointIndex = 0;
     this.respawnMessageTimer = 0;
     this.respawnLockTimer = 0;
+    this.skidMarks = [];
+    this.previousSkidPoints = null;
+    this.dustAccumulator = 0;
+    this.skidRenderAccumulator = 0;
+    this.dustEmitter.killAll();
+    this.skidGraphics.clear();
     this.touchControls = {
       accelerate: false,
       brake: false,
@@ -374,10 +463,12 @@ export default class MountainPassScene extends Phaser.Scene {
     this.hazards.forEach((hazard) => {
       this.tweens.killTweensOf(hazard.rock);
       this.tweens.killTweensOf(hazard.message);
+      this.tweens.killTweensOf(hazard.warningLamp);
       hazard.phase = "ready";
       hazard.timer = 0;
       hazard.indicator.setVisible(false);
       hazard.rock.setVisible(false);
+      hazard.warningLamp.setVisible(false).setAlpha(1);
     });
     this.updateBridgePanel();
     this.vehicle = createVehicle(
@@ -441,12 +532,22 @@ export default class MountainPassScene extends Phaser.Scene {
         hazard.phase = "warning";
         hazard.timer = ROCKFALL_WARNING_SECONDS;
         hazard.indicator.setVisible(true);
+        hazard.warningLamp.setVisible(true);
         this.tweens.add({
           targets: hazard.message,
           alpha: { from: 0.42, to: 1 },
           duration: 280,
           yoyo: true,
           repeat: -1,
+        });
+        this.tweens.add({
+          targets: hazard.warningLamp,
+          alpha: { from: 0.38, to: 1 },
+          scale: { from: 0.82, to: 1.12 },
+          duration: 300,
+          yoyo: true,
+          repeat: -1,
+          ease: "Sine.easeInOut",
         });
         playRockfallWarningSound();
       }
@@ -467,6 +568,8 @@ export default class MountainPassScene extends Phaser.Scene {
 
   private dropRock(hazard: Rockfall) {
     hazard.phase = "falling";
+    this.tweens.killTweensOf(hazard.warningLamp);
+    hazard.warningLamp.setVisible(false);
     hazard.rock.setPosition(
       hazard.config.x,
       hazard.config.y - hazard.config.impactRadius * 3,
@@ -510,6 +613,7 @@ export default class MountainPassScene extends Phaser.Scene {
     this.collisions += 1;
     this.collisionActive = false;
     this.respawnMessageTimer = 3;
+    this.previousSkidPoints = null;
     const checkpoint =
       this.checkpointIndex === 0
         ? MOUNTAIN_START
@@ -529,11 +633,13 @@ export default class MountainPassScene extends Phaser.Scene {
     this.hazards.forEach((hazard) => {
       this.tweens.killTweensOf(hazard.rock);
       this.tweens.killTweensOf(hazard.message);
+      this.tweens.killTweensOf(hazard.warningLamp);
       hazard.phase = "ready";
       hazard.timer = 0;
       hazard.indicator.setVisible(false);
       hazard.rock.setVisible(false);
       hazard.message.setAlpha(1);
+      hazard.warningLamp.setVisible(false).setAlpha(1);
     });
     this.updateNearbyState();
     this.emitHud();
@@ -690,6 +796,9 @@ export default class MountainPassScene extends Phaser.Scene {
     this.add
       .image(MOUNTAIN_WIDTH / 2, MOUNTAIN_HEIGHT / 2, "escape-route-mountain-pass")
       .setDepth(0);
+    this.drawSwayingTrees();
+    this.createWaterGlints();
+    this.skidGraphics = this.add.graphics().setDepth(2);
     this.drawMarkers();
   }
 
@@ -823,7 +932,15 @@ export default class MountainPassScene extends Phaser.Scene {
 
   private drawForest(graphics: Phaser.GameObjects.Graphics) {
     const trees = getForestTrees();
+    const swayingTreeIndices = new Set<number>();
+    this.swayingTrees = [];
     trees.forEach((tree, index) => {
+      if (index % 43 !== 0) return;
+      swayingTreeIndices.add(index);
+      this.swayingTrees.push(tree);
+    });
+    trees.forEach((tree, index) => {
+      if (swayingTreeIndices.has(index)) return;
       const size = 14 + (index % 5) * 2.5;
       graphics.fillStyle(0x111a17, 0.25);
       graphics.fillEllipse(tree.x + 7, tree.y + 13, size * 2, size * 0.75);
@@ -861,60 +978,53 @@ export default class MountainPassScene extends Phaser.Scene {
   }
 
   private drawRoads(graphics: Phaser.GameObjects.Graphics) {
-    MOUNTAIN_ROADS.forEach((road) => {
-      const dx = road.to.x - road.from.x;
-      const dy = road.to.y - road.from.y;
-      const length = Math.hypot(dx, dy);
-      const nx = -dy / length;
-      const ny = dx / length;
-      graphics.lineStyle(road.width + 26, 0x282e2b, 0.72);
-      graphics.lineBetween(road.from.x + 7, road.from.y + 10, road.to.x + 7, road.to.y + 10);
-      graphics.lineStyle(road.width + 15, 0x897f66, 0.96);
-      graphics.lineBetween(road.from.x, road.from.y, road.to.x, road.to.y);
-      graphics.fillStyle(0x897f66, 0.96);
-      graphics.fillCircle(road.from.x, road.from.y, (road.width + 15) / 2);
-      graphics.fillCircle(road.to.x, road.to.y, (road.width + 15) / 2);
-      graphics.lineStyle(road.width + 3, 0x343a38, 1);
-      graphics.lineBetween(road.from.x, road.from.y, road.to.x, road.to.y);
-      graphics.fillStyle(0x343a38, 1);
-      graphics.fillCircle(road.from.x, road.from.y, (road.width + 3) / 2);
-      graphics.fillCircle(road.to.x, road.to.y, (road.width + 3) / 2);
-      graphics.lineStyle(road.width, 0x50534f, 1);
-      graphics.lineBetween(road.from.x, road.from.y, road.to.x, road.to.y);
-      graphics.fillStyle(0x50534f, 1);
-      graphics.fillCircle(road.from.x, road.from.y, road.width / 2);
-      graphics.fillCircle(road.to.x, road.to.y, road.width / 2);
-      graphics.lineStyle(2, 0xc5b98c, 0.56);
-      graphics.lineBetween(
-        road.from.x + nx * road.width * 0.42,
-        road.from.y + ny * road.width * 0.42,
-        road.to.x + nx * road.width * 0.42,
-        road.to.y + ny * road.width * 0.42,
+    MOUNTAIN_ROAD_CENTRELINES.forEach((road, index) => {
+      const path = buildMountainRoadPath(road.points, road.width);
+      this.fillRoadCorridor(graphics, path, road.width + 20, 0x252b28, 0.48);
+      this.fillRoadCorridor(graphics, path, road.width + 12, 0x625e51, 0.82);
+      this.fillRoadCorridor(graphics, path, road.width, 0x3d4441, 1);
+      this.fillRoadCorridor(graphics, path, road.width - 9, 0x464c48, 0.56);
+      this.drawRoadTexture(graphics, path, road.width, index);
+
+      const edgeOffset = road.width * 0.5 - 5;
+      this.strokePolyline(
+        graphics,
+        offsetPolyline(path, edgeOffset),
+        1.5,
+        0xb5b7a9,
+        0.32,
       );
-      graphics.lineBetween(
-        road.from.x - nx * road.width * 0.42,
-        road.from.y - ny * road.width * 0.42,
-        road.to.x - nx * road.width * 0.42,
-        road.to.y - ny * road.width * 0.42,
+      this.strokePolyline(
+        graphics,
+        offsetPolyline(path, -edgeOffset),
+        1.5,
+        0xb5b7a9,
+        0.32,
       );
-      if (length > 150) {
-        for (let distance = 28; distance < length - 20; distance += 66) {
-          const end = Math.min(distance + 25, length - 20);
-          graphics.lineStyle(2, 0xd8c887, 0.68);
+
+      const pathLength = getPolylineLength(path);
+      if (road.width >= 84 && pathLength > 220) {
+        graphics.lineStyle(2, 0xc7b67e, 0.58);
+        for (let distance = 24; distance < pathLength - 18; distance += 72) {
+          const dashStart = pointAtPolylineDistance(path, distance);
+          const dashEnd = pointAtPolylineDistance(
+            path,
+            Math.min(distance + 22, pathLength - 18),
+          );
           graphics.lineBetween(
-            road.from.x + (dx / length) * distance,
-            road.from.y + (dy / length) * distance,
-            road.from.x + (dx / length) * end,
-            road.from.y + (dy / length) * end,
+            dashStart.x,
+            dashStart.y,
+            dashEnd.x,
+            dashEnd.y,
           );
         }
       }
     });
 
     SLIPPERY_ROADS.forEach((road) => {
-      graphics.lineStyle(road.width - 18, 0x8b9994, 0.38);
+      graphics.lineStyle(road.width - 20, 0x9ca99e, 0.14);
       graphics.lineBetween(road.from.x, road.from.y, road.to.x, road.to.y);
-      graphics.lineStyle(3, 0xd5e1d8, 0.38);
+      graphics.lineStyle(2, 0xc4d1c5, 0.28);
       graphics.lineBetween(road.from.x, road.from.y, road.to.x, road.to.y);
     });
 
@@ -929,6 +1039,277 @@ export default class MountainPassScene extends Phaser.Scene {
         zone.y - 36,
         zone.x + 32,
         zone.y + 22,
+      );
+    });
+  }
+
+  private fillRoadCorridor(
+    graphics: Phaser.GameObjects.Graphics,
+    path: Point[],
+    width: number,
+    color: number,
+    alpha: number,
+  ) {
+    const left = offsetPolyline(path, width / 2);
+    const right = offsetPolyline(path, -width / 2).reverse();
+    graphics.fillStyle(color, alpha);
+    graphics.fillPoints([...left, ...right], true);
+  }
+
+  private strokePolyline(
+    graphics: Phaser.GameObjects.Graphics,
+    points: Point[],
+    width: number,
+    color: number,
+    alpha: number,
+  ) {
+    if (points.length < 2) return;
+    graphics.lineStyle(width, color, alpha);
+    graphics.beginPath();
+    graphics.moveTo(points[0].x, points[0].y);
+    points.slice(1).forEach((point) => graphics.lineTo(point.x, point.y));
+    graphics.strokePath();
+  }
+
+  private drawRoadTexture(
+    graphics: Phaser.GameObjects.Graphics,
+    path: Point[],
+    width: number,
+    roadIndex: number,
+  ) {
+    const totalLength = getPolylineLength(path);
+    for (let distance = 12, mark = 0; distance < totalLength - 8; distance += 31, mark += 1) {
+      const center = pointAtPolylineDistance(path, distance);
+      const before = pointAtPolylineDistance(path, Math.max(0, distance - 2));
+      const after = pointAtPolylineDistance(
+        path,
+        Math.min(totalLength, distance + 2),
+      );
+      const tangentLength = Math.hypot(after.x - before.x, after.y - before.y) || 1;
+      const normalX = -(after.y - before.y) / tangentLength;
+      const normalY = (after.x - before.x) / tangentLength;
+      const noise = Math.sin((mark + 1) * 12.9898 + roadIndex * 78.233) * 43758.5453;
+      const random = noise - Math.floor(noise);
+      const offset = (random - 0.5) * Math.max(0, width - 18);
+      const radius = 0.8 + random * 1.4;
+      graphics.fillStyle(mark % 2 ? 0x858a82 : 0x232927, 0.13);
+      graphics.fillEllipse(
+        center.x + normalX * offset,
+        center.y + normalY * offset,
+        radius * 2.2,
+        radius,
+      );
+
+      if (mark % 19 === 8) {
+        const crackX = center.x + normalX * offset;
+        const crackY = center.y + normalY * offset;
+        graphics.lineStyle(1.2, 0x1f2422, 0.34);
+        graphics.beginPath();
+        graphics.moveTo(crackX - normalX * 5, crackY - normalY * 5);
+        graphics.lineTo(crackX, crackY);
+        graphics.lineTo(crackX + normalY * 4, crackY - normalX * 4);
+        graphics.lineTo(crackX + normalX * 7, crackY + normalY * 7);
+        graphics.strokePath();
+      }
+    }
+  }
+
+  private drawSwayingTrees() {
+    this.swayingTrees.forEach((tree, index) => {
+      const size = 14 + (index % 5) * 2.5;
+      const canopy = this.add
+        .container(tree.x, tree.y + size)
+        .setDepth(1);
+      const graphics = this.add.graphics();
+      graphics.fillStyle(0x111a17, 0.2);
+      graphics.fillEllipse(7, 9, size * 2, size * 0.75);
+      graphics.fillStyle(index % 2 ? 0x334638 : 0x3d513e, 0.94);
+      graphics.fillTriangle(
+        0,
+        -size * 2,
+        -size * 0.8,
+        -size * 0.3,
+        size * 0.8,
+        -size * 0.3,
+      );
+      graphics.fillStyle(index % 2 ? 0x496047 : 0x52654b, 0.88);
+      graphics.fillTriangle(
+        0,
+        -size * 1.45,
+        -size * 0.68,
+        0,
+        size * 0.68,
+        0,
+      );
+      graphics.fillStyle(0x74664f, 0.9);
+      graphics.fillRect(-2, -3, 4, 8);
+      canopy.add(graphics);
+      this.tweens.add({
+        targets: canopy,
+        angle: { from: -1.4, to: 1.4 },
+        duration: 2300 + (index % 4) * 360,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+        delay: index * 75,
+      });
+    });
+  }
+
+  private createWaterGlints() {
+    for (let index = 0; index < 12; index += 1) {
+      const segmentIndex = Math.floor(index / 3);
+      const segment = RIVER_CENTERLINE[segmentIndex];
+      const next = RIVER_CENTERLINE[segmentIndex + 1];
+      const progress = (index % 3) / 3;
+      const glint = this.add.graphics().setDepth(1);
+      glint.lineStyle(2, 0xa2c3b1, 0.42);
+      glint.lineBetween(-6, -2, 6, -2);
+      glint.lineStyle(1, 0x9ab8a7, 0.34);
+      glint.lineBetween(-3, 3, 4, 3);
+      glint.setPosition(
+        Phaser.Math.Linear(segment.x, next.x, progress),
+        Phaser.Math.Linear(segment.y, next.y, progress),
+      );
+      this.waterGlints.push(glint);
+      this.flowWaterGlint(glint, segmentIndex);
+    }
+  }
+
+  private flowWaterGlint(
+    glint: Phaser.GameObjects.Graphics,
+    segmentIndex: number,
+  ) {
+    if (!glint.active) return;
+    const from = RIVER_CENTERLINE[segmentIndex];
+    const to = RIVER_CENTERLINE[segmentIndex + 1];
+    const length = Phaser.Math.Distance.Between(from.x, from.y, to.x, to.y);
+    this.tweens.add({
+      targets: glint,
+      x: to.x,
+      y: to.y,
+      duration: length * 24,
+      ease: "Linear",
+      onComplete: () => {
+        if (!glint.active) return;
+        const nextSegment = (segmentIndex + 1) % (RIVER_CENTERLINE.length - 1);
+        const nextStart = RIVER_CENTERLINE[nextSegment];
+        glint.setPosition(nextStart.x, nextStart.y);
+        this.flowWaterGlint(glint, nextSegment);
+      },
+    });
+  }
+
+  private createDustEmitter() {
+    const textureKey = "escape-route-mountain-dust";
+    if (!this.textures.exists(textureKey)) {
+      const texture = this.make.graphics({ x: 0, y: 0 }, false);
+      texture.fillStyle(0xc5b99c, 0.65);
+      texture.fillCircle(5, 5, 4);
+      texture.generateTexture(textureKey, 10, 10);
+      texture.destroy();
+    }
+    this.dustEmitter = this.add
+      .particles(0, 0, textureKey, {
+        angle: { min: 0, max: 360 },
+        alpha: { start: 0.3, end: 0 },
+        emitting: false,
+        frequency: -1,
+        lifespan: { min: 260, max: 460 },
+        maxParticles: 42,
+        quantity: 1,
+        scale: { start: 0.5, end: 1.4 },
+        speed: { min: 5, max: 17 },
+      })
+      .setDepth(6);
+  }
+
+  private updateEnvironmentEffects(dt: number) {
+    const forwardX = Math.cos(this.vehicle.angle);
+    const forwardY = Math.sin(this.vehicle.angle);
+    const sideX = -forwardY;
+    const sideY = forwardX;
+    const rearX = this.vehicle.x - forwardX * VEHICLE_LENGTH * 0.36;
+    const rearY = this.vehicle.y - forwardY * VEHICLE_LENGTH * 0.36;
+    const skidding =
+      Math.abs(this.vehicle.speed) > 85 &&
+      Math.abs(this.vehicle.lateralSpeed) > 19;
+
+    if (skidding) {
+      const current: [Point, Point] = [
+        {
+          x: rearX + sideX * VEHICLE_WIDTH * 0.36,
+          y: rearY + sideY * VEHICLE_WIDTH * 0.36,
+        },
+        {
+          x: rearX - sideX * VEHICLE_WIDTH * 0.36,
+          y: rearY - sideY * VEHICLE_WIDTH * 0.36,
+        },
+      ];
+      if (this.previousSkidPoints) {
+        current.forEach((point, index) => {
+          const previous = this.previousSkidPoints?.[index];
+          if (!previous || Phaser.Math.Distance.Between(
+            previous.x,
+            previous.y,
+            point.x,
+            point.y,
+          ) < 1.5) {
+            return;
+          }
+          this.skidMarks.push({
+            from: previous,
+            to: point,
+            life: 2.4,
+          });
+        });
+      }
+      this.previousSkidPoints = current;
+    } else {
+      this.previousSkidPoints = null;
+    }
+
+    this.dustAccumulator -= dt;
+    if (this.dustAccumulator <= 0) {
+      this.dustAccumulator = 0.085;
+      if (Math.abs(this.vehicle.speed) > 75 && this.isOnGravelShoulder()) {
+        this.dustEmitter.emitParticleAt(rearX, rearY, 1);
+      }
+    }
+
+    this.skidMarks = this.skidMarks
+      .map((mark) => ({ ...mark, life: mark.life - dt }))
+      .filter((mark) => mark.life > 0)
+      .slice(-120);
+    this.skidRenderAccumulator -= dt;
+    if (this.skidRenderAccumulator > 0) return;
+    this.skidRenderAccumulator = 0.1;
+    this.skidGraphics.clear();
+    this.skidMarks.forEach((mark) => {
+      this.skidGraphics.lineStyle(
+        2.4,
+        0x202321,
+        Math.min(mark.life / 2.4, 0.34),
+      );
+      this.skidGraphics.lineBetween(
+        mark.from.x,
+        mark.from.y,
+        mark.to.x,
+        mark.to.y,
+      );
+    });
+  }
+
+  private isOnGravelShoulder() {
+    return MOUNTAIN_ROADS.some((road) => {
+      const distance = this.distanceToRoad(
+        this.vehicle.x,
+        this.vehicle.y,
+        road,
+      );
+      return (
+        distance > road.width / 2 - 4 &&
+        distance <= road.width / 2 + 8
       );
     });
   }
@@ -955,12 +1336,22 @@ export default class MountainPassScene extends Phaser.Scene {
     graphics.fillStyle(0x272b27, 0.32);
     graphics.fillEllipse(1440, 1227, 235, 206);
     LANDSLIDE_ROCKS.forEach((rock, index) => {
-      graphics.fillStyle(0x373a35, 1);
-      graphics.fillCircle(rock.x + 7, rock.y + 11, rock.radius + 3);
+      graphics.fillStyle(0x373a35, 0.9);
+      graphics.fillPoints(
+        getRockVertices(rock.x + 7, rock.y + 11, rock.radius + 3, index + 2),
+        true,
+      );
       graphics.fillStyle(index % 2 ? 0x777263 : 0x68675d, 1);
-      graphics.fillCircle(rock.x, rock.y, rock.radius);
+      graphics.fillPoints(getRockVertices(rock.x, rock.y, rock.radius, index), true);
       graphics.fillStyle(0xaaa18a, 0.52);
-      graphics.fillCircle(rock.x - 13, rock.y - 16, rock.radius * 0.48);
+      graphics.fillTriangle(
+        rock.x - rock.radius * 0.68,
+        rock.y - rock.radius * 0.22,
+        rock.x - rock.radius * 0.16,
+        rock.y - rock.radius * 0.78,
+        rock.x + rock.radius * 0.12,
+        rock.y - rock.radius * 0.14,
+      );
       graphics.lineStyle(3, 0x403f38, 0.75);
       graphics.lineBetween(rock.x - 20, rock.y + 3, rock.x + 10, rock.y - 15);
     });
@@ -1309,11 +1700,35 @@ export default class MountainPassScene extends Phaser.Scene {
       boulder.fillStyle(0x242824, 0.5);
       boulder.fillEllipse(-5, 16, config.impactRadius * 2.6, config.impactRadius);
       boulder.fillStyle(index % 2 ? 0x777467 : 0x67665c, 1);
-      boulder.fillCircle(0, 0, config.impactRadius);
+      boulder.fillPoints(
+        getRockVertices(0, 0, config.impactRadius, index + 4),
+        true,
+      );
       boulder.fillStyle(0xb5aa8f, 0.52);
-      boulder.fillCircle(-config.impactRadius * 0.28, -config.impactRadius * 0.3, config.impactRadius * 0.42);
+      boulder.fillTriangle(
+        -config.impactRadius * 0.78,
+        -config.impactRadius * 0.2,
+        -config.impactRadius * 0.22,
+        -config.impactRadius * 0.72,
+        config.impactRadius * 0.16,
+        -config.impactRadius * 0.1,
+      );
       rock.add(boulder);
       rock.setVisible(false);
+      const warningLamp = this.add
+        .container(config.x + 68, config.y - 62)
+        .setDepth(5);
+      const lamp = this.add.graphics();
+      lamp.fillStyle(0x282e2b, 0.9);
+      lamp.fillRect(-2, 4, 4, 18);
+      lamp.fillStyle(0x342c24, 1);
+      lamp.fillCircle(0, 0, 10);
+      lamp.fillStyle(0xe4a451, 0.3);
+      lamp.fillCircle(0, 0, 9);
+      lamp.fillStyle(0xf4c26d, 1);
+      lamp.fillCircle(0, 0, 4);
+      warningLamp.add(lamp);
+      warningLamp.setVisible(false);
       return {
         config,
         phase: "ready",
@@ -1322,6 +1737,7 @@ export default class MountainPassScene extends Phaser.Scene {
         ring,
         message,
         rock,
+        warningLamp,
       };
     });
   }
@@ -1436,6 +1852,24 @@ export default class MountainPassScene extends Phaser.Scene {
     graphics.fillRoundedRect(-12, -VEHICLE_WIDTH / 2 + 5, 25, VEHICLE_WIDTH - 10, 6);
     graphics.fillStyle(0x829092, 0.9);
     graphics.fillRoundedRect(-8, -VEHICLE_WIDTH / 2 + 7, 17, VEHICLE_WIDTH - 14, 4);
+    graphics.fillStyle(0xe5ca86, 0.045);
+    graphics.fillTriangle(
+      VEHICLE_LENGTH / 2 - 3,
+      -VEHICLE_WIDTH / 2 + 5,
+      VEHICLE_LENGTH / 2 + 116,
+      -VEHICLE_WIDTH * 0.72,
+      VEHICLE_LENGTH / 2 + 116,
+      VEHICLE_WIDTH * 0.72,
+    );
+    graphics.fillStyle(0xe9d59c, 0.07);
+    graphics.fillTriangle(
+      VEHICLE_LENGTH / 2 - 3,
+      -VEHICLE_WIDTH / 2 + 5,
+      VEHICLE_LENGTH / 2 + 68,
+      -VEHICLE_WIDTH * 0.48,
+      VEHICLE_LENGTH / 2 + 68,
+      VEHICLE_WIDTH * 0.48,
+    );
     graphics.fillStyle(0xe8e5ce, 1);
     graphics.fillRoundedRect(VEHICLE_LENGTH / 2 - 8, -VEHICLE_WIDTH / 2 + 5, 5, 8, 2);
     graphics.fillRoundedRect(VEHICLE_LENGTH / 2 - 8, VEHICLE_WIDTH / 2 - 13, 5, 8, 2);
