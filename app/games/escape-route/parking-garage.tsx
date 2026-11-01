@@ -98,16 +98,23 @@ function TouchButton({
   children: ReactNode;
   controllerRef: RefObject<EscapeRouteController | null>;
 }) {
-  const release = () => controllerRef.current?.setTouchControl(control, false);
+  const [pressed, setPressed] = useState(false);
+  const release = () => {
+    setPressed(false);
+    controllerRef.current?.setTouchControl(control, false);
+  };
 
   return (
     <button
       className={`er-touch-button er-touch-${control}`}
       type="button"
       aria-label={label}
+      aria-pressed={pressed}
+      data-pressed={pressed}
       onPointerDown={(event) => {
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
+        setPressed(true);
         controllerRef.current?.setTouchControl(control, true);
       }}
       onPointerUp={release}
@@ -125,6 +132,7 @@ export default function ParkingGarage() {
   const hostRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<EscapeRouteController | null>(null);
   const [snapshot, setSnapshot] = useState(INITIAL_SNAPSHOT);
+  const [mapExpanded, setMapExpanded] = useState(false);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [progressLoaded, setProgressLoaded] = useState(false);
@@ -236,7 +244,7 @@ export default function ParkingGarage() {
   const starsAwarded = completionResult?.stars ?? 1;
 
   return (
-    <main className="escape-route-shell">
+    <main className="escape-route-shell er-garage-shell">
       <div className="er-page">
         <header className="er-header">
           <Link className="er-back-link" href="/games/escape-route" aria-label="Back to City Intersection">
@@ -277,6 +285,113 @@ export default function ParkingGarage() {
                 <span>UNDERGROUND PARKING</span>
                 <span className="er-scene-divider" />
                 <span>LOWER DECK</span>
+              </div>
+              <div className="er-mobile-hud">
+                <section className="er-mobile-objective" aria-label="Current objective">
+                  <span className="er-mobile-level">LEVEL 02 · UNDERGROUND PARKING</span>
+                  <strong>{getObjective(snapshot)}</strong>
+                  <span className="er-mobile-route">{getCallout(snapshot)}</span>
+                  {((snapshot.nearTicket && !snapshot.ticketCollected) ||
+                    (snapshot.nearTerminal && !snapshot.terminalActivated)) && (
+                    <button
+                      className="er-mobile-interact"
+                      type="button"
+                      onClick={() => controllerRef.current?.interact()}
+                    >
+                      {snapshot.nearTicket && !snapshot.ticketCollected
+                        ? "TAKE PARKING TICKET"
+                        : snapshot.ticketCollected
+                          ? "PAY AT TERMINAL"
+                          : "TICKET REQUIRED"}
+                    </button>
+                  )}
+                  {progressLoaded && progressError && !snapshot.won && (
+                    <span className="er-mobile-progress-error" role="alert">
+                      {progressError}
+                    </span>
+                  )}
+                </section>
+                <div className="er-mobile-right-rail">
+                  <div className="er-mobile-top-actions">
+                    <span className="er-mobile-timer" aria-label={`Elapsed ${formatTime(snapshot.elapsed)}`}>
+                      {formatTime(snapshot.elapsed)}
+                    </span>
+                    <button
+                      className="er-mobile-pause"
+                      type="button"
+                      onClick={togglePause}
+                      disabled={snapshot.won || !unlocked}
+                      aria-label={snapshot.paused ? "Resume game" : "Pause game"}
+                    >
+                      {snapshot.paused ? (
+                        <Play size={16} aria-hidden="true" />
+                      ) : (
+                        <Pause size={16} aria-hidden="true" />
+                      )}
+                    </button>
+                  </div>
+                  <section
+                    className={`er-mobile-navigation${mapExpanded ? " is-expanded" : ""}`}
+                    aria-label="Garage navigation map"
+                  >
+                    <div className="er-mobile-map-heading">
+                      <span>GARAGE ROUTE</span>
+                      <button
+                        type="button"
+                        aria-expanded={mapExpanded}
+                        aria-controls="er-mobile-garage-map"
+                        aria-label={mapExpanded ? "Close expanded navigation map" : "Expand navigation map"}
+                        onClick={() => setMapExpanded((expanded) => !expanded)}
+                      >
+                        {mapExpanded ? "CLOSE" : "EXPAND"}
+                      </button>
+                    </div>
+                    <div id="er-mobile-garage-map">
+                      <NavigationMap
+                        player={{ x: snapshot.x, y: snapshot.y }}
+                        heading={snapshot.heading}
+                        switchActivated={snapshot.terminalActivated}
+                        primaryActivated={snapshot.ticketCollected}
+                        secondaryActivated={snapshot.terminalActivated}
+                        layout={GARAGE_LAYOUT}
+                        ariaLabel="Garage map showing your position, parking ticket, payment terminal, exit barrier, and street exit"
+                      />
+                    </div>
+                    <span className="er-mobile-map-status">
+                      {snapshot.terminalActivated
+                        ? "EXIT OPEN · FOLLOW THE RAMP"
+                        : snapshot.ticketCollected
+                          ? "TICKET SECURED · FIND TERMINAL"
+                          : "TICKET · TERMINAL · EXIT"}
+                    </span>
+                  </section>
+                </div>
+                <div className="er-mobile-telemetry" aria-label="Vehicle telemetry">
+                  <div className="er-mobile-speed-reading">
+                    <strong>{snapshot.speed}</strong>
+                    <span className="er-mobile-speed-unit">KM/H</span>
+                    <span
+                      className="er-mobile-gear"
+                      aria-label={snapshot.signedSpeed < 0 ? "Reverse" : "Drive"}
+                    >
+                      {snapshot.signedSpeed < 0 ? "R" : "D"}
+                    </span>
+                  </div>
+                  <span className="er-mobile-vehicle-state">
+                    <i />
+                    {snapshot.speed > 4 ? "IN MOTION" : "PARKED"}
+                  </span>
+                </div>
+                <div className="er-mobile-controls" aria-label="Touch driving controls">
+                  <div className="er-mobile-steering">
+                    <TouchButton control="left" label="Steer left" controllerRef={controllerRef}>←</TouchButton>
+                    <TouchButton control="right" label="Steer right" controllerRef={controllerRef}>→</TouchButton>
+                  </div>
+                  <div className="er-mobile-pedals">
+                    <TouchButton control="brake" label="Brake and reverse" controllerRef={controllerRef}>BRAKE</TouchButton>
+                    <TouchButton control="accelerate" label="Accelerate" controllerRef={controllerRef}>DRIVE</TouchButton>
+                  </div>
+                </div>
               </div>
               <div className="er-engine-host" ref={hostRef} />
               {!ready && !loadError && unlocked && (
