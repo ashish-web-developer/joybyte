@@ -27,7 +27,7 @@ The codebase is structured around the Next.js App Router and is intentionally li
 ## Project structure
 
 ```text
-next-ui-toolkit/
+joybyte/
 ├── app/
 │   ├── api/
 │   │   └── generate/

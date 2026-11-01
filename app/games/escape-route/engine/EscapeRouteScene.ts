@@ -345,7 +345,7 @@ export default class EscapeRouteScene extends Phaser.Scene {
       0x687263,
     );
 
-    const ground = this.add.graphics();
+    const ground = this.make.graphics({ x: 0, y: 0 }, false);
     ground.fillStyle(0x5d6859, 0.32);
     let seed = 81427;
     const random = () => {
@@ -366,6 +366,13 @@ export default class EscapeRouteScene extends Phaser.Scene {
     this.drawStreetFixtures(ground);
     this.drawBuildings(ground);
     this.drawTrees(ground);
+    ground.generateTexture("escape-route-city", MAP_WIDTH, MAP_HEIGHT);
+    ground.destroy();
+    this.add.image(
+      MAP_WIDTH / 2,
+      MAP_HEIGHT / 2,
+      "escape-route-city",
+    );
     this.drawParkedCars();
   }
 
